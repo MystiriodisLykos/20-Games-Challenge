@@ -11,6 +11,7 @@ import Graphics.Gloss                     ( Display (InWindow)
                                           , display
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
+import Debug.Trace (trace)
 
 import qualified Graphics.Gloss.Interface.IO.Game as G
 
@@ -42,12 +43,17 @@ animateBall = proc i -> do
   returnA -< drawBall pos
 
 parsegInput :: InputEvent -> Direction
-parsegInput (G.EventKey (G.SpecialKey G.KeyRight) G.Down _ _) = Up
+parsegInput (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _) = Up
 parsegInput _ = Down
 
+-- The reason the ball goes back down when I'm done pressing the button is
+-- because when I release the button an event is fired that gets turned into Down direction
+-- This can be verified by moving this mouse, which also causes a change to Down
 parseInput :: SF (Event InputEvent) GameInput
 parseInput = proc e ->
-  returnA -< fmap parsegInput e
+  let e' = fmap parsegInput e
+    in
+  returnA -< (trace (show e') e')
 --parseInput = proc e -> case e of
 --    Event (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _) -> hold (Event Down) -< Event (Event Up)
 --    _ -> hold (Event Up) -< (Event (Event (Down)))
