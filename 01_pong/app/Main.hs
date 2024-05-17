@@ -2,8 +2,10 @@
 
 import Control.Concurrent
 import Control.Arrow                      ( returnA, (>>>), arr )
-import FRP.Yampa                          ( SF, Event (Event)
-                                          , integral, reactimate, now, constant, event, tag, hold )
+import FRP.Yampa                          ( SF, Event (Event, NoEvent)
+                                          , integral, reactimate, now
+                                          , constant, event, tag, hold
+                                          , mapFilterE)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Color,Translate)
                                           , circleSolid
@@ -42,24 +44,14 @@ animateBall = proc i -> do
   (pos, vel) <- fallingBall 0 -< i
   returnA -< drawBall pos
 
-parsegInput :: InputEvent -> Direction
-parsegInput (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _) = Up
-parsegInput _ = Down
+parsegInput :: InputEvent -> Maybe Direction
+parsegInput (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _) = Just Up
+parsegInput (G.EventKey (G.SpecialKey G.KeyUp) G.Up _ _) = Just Down
+parsegInput _ = Nothing
 
--- The reason the ball goes back down when I'm done pressing the button is
--- because when I release the button an event is fired that gets turned into Down direction
--- This can be verified by moving this mouse, which also causes a change to Down
 parseInput :: SF (Event InputEvent) GameInput
 parseInput = proc e ->
-  let e' = fmap parsegInput e
-    in
-  returnA -< (trace (show e') e')
---parseInput = proc e -> case e of
---    Event (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _) -> hold (Event Down) -< Event (Event Up)
---    _ -> hold (Event Up) -< (Event (Event (Down)))
---parseInput = proc e -> case e of
---    Event (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _) -> now Up -< ()
---    _ -> now Down -< ()
+  returnA -< mapFilterE parsegInput e
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 30
