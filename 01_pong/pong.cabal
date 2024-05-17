@@ -23,7 +23,7 @@ name:               pong
 version:            0.1.0.0
 
 -- A short (one-line) description of the package.
--- synopsis:
+synopsis:           pong clone
 
 -- A longer description of the package.
 -- description:
@@ -68,7 +68,11 @@ executable pong
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.17.2.1
+    build-depends:
+        base ^>=4.17.2.1,
+        yampa-gloss ^>=0.2,
+        Yampa ^>=0.14,
+        gloss ^>=1.13
 
     -- Directories containing source files.
     hs-source-dirs:   app
