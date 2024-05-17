@@ -45,6 +45,10 @@ data PaddleState = PaddleState {
   y :: Double
 } deriving Show
 
+-- TODO: change this back to Event PaddleInput
+-- I think I like it better conceptually that the paddle reacts to events
+-- Like they are commands instead of being a string of movements just by
+-- another Name
 type Paddle = SF PaddleInput PaddleState
 
 paddle :: Double -> Double -> Paddle
