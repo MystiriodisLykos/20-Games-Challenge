@@ -1,11 +1,12 @@
 {-# LANGUAGE Arrows #-}
 
 import Control.Concurrent
-import Control.Arrow                      ( returnA, (>>>), arr )
+import Control.Arrow                      ( returnA, (>>>), arr, (&&&) )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , integral, reactimate, now
                                           , constant, event, tag, hold
-                                          , mapFilterE, dHold)
+                                          , mapFilterE, dHold, identity
+                                          , rSwitch)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Color,Translate)
                                           , circleSolid
@@ -16,6 +17,7 @@ import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Debug.Trace (trace)
 
 import qualified Graphics.Gloss.Interface.IO.Game as G
+
 
 data KeyInput = KeyInput {
   key :: G.Key,
@@ -51,14 +53,29 @@ data PaddleState = PaddleState {
 -- another Name
 type Paddle = SF PaddleInput PaddleState
 
+paddleV :: PaddleInput -> SF () Double
+paddleV MoveUp = constant 100
+paddleV MoveDown = constant (-100)
+paddleV Stop = constant 0
+
+-- Having made this function that now works on Event PaddleInput
+-- I'm not to into it because at the next level up I still need
+-- to have something to hold the Events to figure out the actual
+-- paddles movement and then rewrap that stream into events
+paddle' :: Double -> Double -> SF (Event PaddleInput) PaddleState
+paddle' x0 y0 = proc pi -> do
+  v <- (rSwitch $ constant 0) -< ((), (paddleV <$> pi))
+  y <- integral -< v
+  returnA -< PaddleState x0 (y0 + y)
+
 paddle :: Double -> Double -> Paddle
 paddle x0 y0 = proc pi -> do
-  y <- integral -< (paddleV pi)
+  y <- integral -< v pi
   returnA -< PaddleState x0 (y0 + y)
   where
-    paddleV MoveUp = 100
-    paddleV MoveDown = -100
-    paddleV Stop = 0
+    v MoveUp = 100
+    v MoveDown = -100
+    v Stop = 0
 
 drawBall :: Double -> Picture
 drawBall p = Translate 0 (realToFrac p) $ circleSolid 10
@@ -68,6 +85,13 @@ animateBall = proc i -> do
   rec
     pi <- dHold Stop -< (fmap parsePaddleInput i) <> Event pi
     ps <- paddle 0 0 -< pi
+  returnA -< drawBall (y ps)
+
+animateBall' :: SF GameInput Picture
+animateBall' = proc i -> do
+  rec
+    pi <- dHold Stop -< (fmap parsePaddleInput i) <> Event pi
+    ps <- paddle' 0 0 -< Event pi
   returnA -< drawBall (y ps)
 
 parseGlossInput :: InputEvent -> Maybe KeyInput
@@ -89,10 +113,10 @@ parseInput = proc e ->
   returnA -< mapFilterE parseGlossInput e
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
-defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 30
+defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 60
 
 main :: IO ()
-main = defaultPlay $ parseInput >>> animateBall
+main = defaultPlay $ parseInput >>> animateBall'
 --main = reactimate (return $ Event (G.EventKey (G.SpecialKey G.KeyLeft) G.Down (G.Modifiers G.Up G.Up G.Up) (1,1)))
 --                  (\_ -> threadDelay 10000 >> return (0.1, Just (Event $ G.EventKey (G.SpecialKey G.KeyUp) G.Down (G.Modifiers G.Up G.Up G.Up) (1,1))))
 --                  (\_ -> return (0.1,  Nothing))
