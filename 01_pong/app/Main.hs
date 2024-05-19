@@ -6,7 +6,7 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , integral, reactimate, now
                                           , constant, event, tag, hold
                                           , mapFilterE, dHold, identity
-                                          , rSwitch)
+                                          , rSwitch, accumHoldBy)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Color,Translate)
                                           , circleSolid
@@ -54,13 +54,13 @@ animateBall = proc i -> do
   p <- paddle $ PaddleState 0 0 200 -< pi
   returnA -< drawPaddle p
 
-parseGameInput :: GameInput -> InputEvent -> Maybe GameInput
+parseGameInput :: GameInput -> InputEvent -> GameInput
 --parseGameInput _ i | trace (show i) False = undefined
-parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Down _ _)   = Just gi { keyUp = G.Down }
-parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Up _ _)     = Just gi { keyUp = G.Up }
-parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyDown) G.Down _ _) = Just gi { keyDown = G.Down }
-parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyDown) G.Up _ _)   = Just gi { keyDown = G.Up }
-parseGameInput _ _ = Nothing
+parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Down _ _)   = gi { keyUp = G.Down }
+parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Up _ _)     = gi { keyUp = G.Up }
+parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyDown) G.Down _ _) = gi { keyDown = G.Down }
+parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyDown) G.Up _ _)   = gi { keyDown = G.Up }
+parseGameInput gi _ = gi
 
 parsePaddleInput :: GameInput -> PaddleInput
 parsePaddleInput GameInput{keyUp = G.Down, keyDown = G.Up}   = PaddleUp
@@ -70,16 +70,12 @@ parsePaddleInput _ = PaddleStop
 
 paddleInput = arr parsePaddleInput
 
-parseInput :: SF (Event InputEvent) GameInput
-parseInput = proc e -> do
-  rec
-    -- TODO: use accumeHoldBy
-    i <- dHold $ GameInput G.Up G.Up -< mapFilterE (parseGameInput i) e
-  returnA -< i
+input :: SF (Event InputEvent) GameInput
+input = accumHoldBy parseGameInput $ GameInput G.Up G.Up
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 60
 
 main :: IO ()
-main = defaultPlay $ parseInput >>> animateBall
+main = defaultPlay $ input >>> animateBall
 
