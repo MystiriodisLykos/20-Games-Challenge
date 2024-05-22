@@ -72,7 +72,8 @@ executable pong
         base ^>=4.17.2.1,
         yampa-gloss ^>=0.2,
         Yampa ^>=0.14,
-        gloss ^>=1.13
+        gloss ^>=1.13,
+        linear ^>=1.22
 
     -- Directories containing source files.
     hs-source-dirs:   app
