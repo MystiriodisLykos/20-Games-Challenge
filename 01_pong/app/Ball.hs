@@ -4,11 +4,11 @@ import Control.Concurrent
 import Control.Arrow                      ( returnA, (>>>), arr )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , VectorSpace(zeroVector, (*^), (^+^), dot)
-                                          , integral, reactimate, now
-                                          , constant, event, tag, hold
+                                          , integral, reactimate, now, notYet
+                                          , constant, event, tag, hold, after
                                           , mapFilterE, isEvent, edge, lMerge
                                           , identity, accumHold, repeatedly, delayEvent
-                                          , dpSwitch, never, edgeTag, mergeBy)
+                                          , dpSwitch, never, edgeTag, mergeBy, switch)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Color
                                           , Picture (Color,Translate, Pictures)
@@ -29,9 +29,9 @@ data BallState = BallState {
   bP :: V2 Float,
   bV :: V2 Float,
   bColor :: Color
-}
+} deriving (Eq, Show)
 
-data Collision = VerticalCollision | HorizontalCollision | BothCollision deriving Show
+data Collision = VerticalCollision | HorizontalCollision | BothCollision deriving (Eq, Show)
 
 vc :: Collision
 vc = VerticalCollision
@@ -45,18 +45,22 @@ both = BothCollision
 data BallInput = BallInput {
   collision :: Event Collision,
   score :: Event ()
-}
+} deriving (Eq, Show)
+
+reflect :: Collision -> V2 Float -> V2 Float
+reflect VerticalCollision = (*) $ V2 1 (-1)
+reflect HorizontalCollision = (*) $ V2 (-1) 1
+reflect _ = (*) (-1)
 
 pongBall :: BallState -> SF BallInput BallState
-pongBall initial = proc bi -> do
-  v <- accumHold $ bV initial -< reflect <$> collision bi
-  p <- integral -< v
-  returnA -< initial {bP = p + bP initial}
+pongBall initial = switch ball pongBall
   where
-    reflect :: Collision -> V2 Float -> V2 Float
-    reflect VerticalCollision = (*) $ V2 1 (-1)
-    reflect HorizontalCollision = (*) $ V2 (-1) 1
-    reflect _ = (*) (-1)
+    ball = proc bi -> do
+      v <- accumHold $ bV initial -< reflect <$> collision bi
+      p <- integral -< v
+      s <- notYet -< score bi
+      let bs = initial {bP = p + bP initial}
+      returnA -< (bs, s `tag` initial {bV = v})
 
 pongBallCollision :: SF BallState (Event Collision)
 pongBallCollision = proc bs -> do
@@ -74,7 +78,8 @@ ball initial = proc bi -> do
   rec
     bs <- pongBall initial -< bi'
     c <- pongBallCollision -< bs
-    let bi' = BallInput c NoEvent
+    s <- repeatedly 5 () -< bi
+    let bi' = BallInput c s
   returnA -< bs
 
 drawBall :: BallState -> Picture
