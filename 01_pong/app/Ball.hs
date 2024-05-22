@@ -96,16 +96,11 @@ drawBall (BallState (V2 x y)  _ color) = Color color $ Translate x y $ circleSol
 exampleBall :: Color -> V2 Float -> SF a BallState
 exampleBall c vi = ball (BallState (V2 0 0) vi c) exampleBallCollision exampleBallScore
 
-animateBall :: SF a BallState ->  SF a Picture
-animateBall ball = proc i -> do
-  bs <- ball -< i
-  returnA -< drawBall bs
-
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 30
 
 main :: IO ()
-main = defaultPlay $ parB (animateBall <$> [
+main = defaultPlay $ parB ((\b -> b >>> (arr drawBall)) <$> [
   exampleBall black (V2 50 (-50)),
   exampleBall red (V2 50   50 ),
   exampleBall blue (V2 50  100 ),
