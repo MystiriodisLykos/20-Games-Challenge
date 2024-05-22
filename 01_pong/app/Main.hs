@@ -7,7 +7,7 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , constant, event, tag, hold
                                           , mapFilterE, dHold, identity
                                           , rSwitch, accumHoldBy, edgeTag
-                                          , repeatedly)
+                                          , repeatedly, edge, notYet, pre)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Color,Translate)
                                           , circleSolid
@@ -21,7 +21,7 @@ import Debug.Trace (trace)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Linear.V2   ( V2 (V2) )
 
-import Ball (BallState(..), Collision, Score, vertical, horizontal, ball, drawBall, v2y)
+import Ball (BallState(..), Collision, Score, vertical, horizontal, ball, drawBall, v2y, v2x)
 
 data GameInput = GameInput {
   keyUp :: G.KeyState,
@@ -57,10 +57,13 @@ wallCollision = proc (gi, bs) -> do
   returnA -< c
 
 score :: Score (GameInput, BallState)
-score = repeatedly 7 ()
+score = proc (gi, bs) -> do
+  let x = (fromIntegral . v2x . screenSize) gi
+  s <- edge -< abs (v2x $ bP bs) - 10 >= x/2
+  returnA -< s
 
 ball' :: SF GameInput BallState
-ball' = ball (BallState (V2 0 0) (V2 50 100) black) wallCollision score
+ball' = ball (BallState (V2 0 0) (V2 50 100) black) wallCollision (score >>> pre)
 
 drawPaddle :: PaddleState -> Picture
 drawPaddle ps = Translate (realToFrac $ px ps) (realToFrac $ py ps) $ circleSolid 10
@@ -89,7 +92,7 @@ parsePaddleInput _ = PaddleStop
 paddleInput = arr parsePaddleInput
 
 input :: SF (Event InputEvent) GameInput
-input = accumHoldBy parseGameInput $ GameInput G.Up G.Up (V2 0 0)
+input = accumHoldBy parseGameInput $ GameInput G.Up G.Up (V2 100 100)
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 60
