@@ -18,6 +18,7 @@ import Debug.Trace (trace)
 
 import qualified Graphics.Gloss.Interface.IO.Game as G
 
+import Ball (BallState, Collision, Score, vertical, horizontal, ball, drawBall)
 
 data GameInput = GameInput {
   keyUp :: G.KeyState,

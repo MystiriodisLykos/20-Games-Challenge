@@ -1,5 +1,15 @@
 {-# LANGUAGE Arrows #-}
 
+module Ball ( BallState(..)
+            , BallInput(..)
+            , Bounce
+            , Collision
+            , Score
+            , vertical
+            , horizontal
+            , ball
+            , drawBall ) where
+
 import Control.Concurrent
 import Control.Arrow                      ( returnA, (>>>), arr )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent)
@@ -108,10 +118,3 @@ main = defaultPlay $ parB ((\b -> b >>> (arr drawBall)) <$> [
   exampleBall orange (V2 0  (-100)),
   exampleBall yellow (V2 50 0 )
   ]) >>> arr Pictures
---main = reactimate (return $ Event (G.EventKey (G.SpecialKey G.KeyLeft) G.Down (G.Modifiers G.Up G.Up G.Up) (1,1)))
---                  (\_ -> threadDelay 10000 >> return (0.1, Just (Event $ G.EventKey (G.SpecialKey G.KeyUp) G.Down (G.Modifiers G.Up G.Up G.Up) (1,1))))
---                  (\_ -> return (0.1,  Nothing))
---                  (\_ e -> putStrLn (show e) >> return False)
---                  (parseInput)
---                  (\_ (pos, vel) -> putStrLn ("pos: " ++ show pos ++ " vel: " ++ show vel) >> return False)
---                  (fallingBall 10)
