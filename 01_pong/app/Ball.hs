@@ -8,7 +8,9 @@ module Ball ( BallState(..)
             , vertical
             , horizontal
             , ball
-            , drawBall ) where
+            , drawBall
+            , v2x
+            , v2y ) where
 
 import Control.Concurrent
 import Control.Arrow                      ( returnA, (>>>), arr )
