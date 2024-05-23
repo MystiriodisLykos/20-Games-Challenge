@@ -9,8 +9,7 @@ module Ball ( BallState(..)
             , horizontal
             , ball
             , drawBall
-            , v2x
-            , v2y ) where
+            ) where
 
 import Control.Concurrent
 import Control.Arrow                      ( returnA, (>>>), arr )
@@ -31,11 +30,7 @@ import qualified Linear.Vector as Vector
 import qualified Linear.Metric as Metric
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 
-instance (RealFloat a) => VectorSpace (V2 a) a where
-  zeroVector = Vector.zero
-  (*^) s = fmap ((*) s)
-  (^+^) = (Vector.^+^)
-  dot = Metric.dot
+import Types (v2x, v2y)
 
 data BallState = BallState {
   bP :: V2 Float,
@@ -59,12 +54,6 @@ horizontal v = bounce v (V2 1 0)
 type Collision a = SF a (Event Bounce)
 type Score a = SF a (Event ())
 
-v2x :: V2 a -> a
-v2x (V2 x _) = x
-
-v2y :: V2 a -> a
-v2y (V2 _ y) = y
-
 -- Doesn't always work as expected when the surface
 -- vector is parallel or orthogonal to the vector
 -- in that case bounce twice
@@ -84,16 +73,6 @@ pongBall initial = switch ball pongBall
       let bs = initial {bP = p + bP initial}
       returnA -< (bs, s `tag` initial {bV = v})
 
-exampleBallCollision :: Collision (a, BallState)
-exampleBallCollision = proc (_, bs) -> do
-  vc <- edgeTag vertical -< abs (v2y $ bP bs) >= 200
-  hc <- edgeTag horizontal -< abs (v2x $ bP bs) >= 200
-  let c = mergeBy (.) vc hc
-  returnA -< c
-
-exampleBallScore :: Score a
-exampleBallScore = repeatedly 7 ()
-
 ball :: BallState -> Collision (a, BallState) -> Score (a, BallState) -> SF a BallState
 ball initial c s = proc bi -> do
   rec
@@ -104,6 +83,16 @@ ball initial c s = proc bi -> do
 
 drawBall :: BallState -> Picture
 drawBall (BallState (V2 x y)  _ color) = Color color $ Translate x y $ circleSolid 10
+
+exampleBallCollision :: Collision (a, BallState)
+exampleBallCollision = proc (_, bs) -> do
+  vc <- edgeTag vertical -< abs (v2y $ bP bs) >= 200
+  hc <- edgeTag horizontal -< abs (v2x $ bP bs) >= 200
+  let c = mergeBy (.) vc hc
+  returnA -< c
+
+exampleBallScore :: Score a
+exampleBallScore = repeatedly 7 ()
 
 exampleBall :: Color -> V2 Float -> SF a BallState
 exampleBall c vi = ball (BallState (V2 0 0) vi c) exampleBallCollision exampleBallScore
