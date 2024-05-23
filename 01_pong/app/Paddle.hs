@@ -1,5 +1,12 @@
 {-# LANGUAGE Arrows #-}
 
+module Paddle( PaddleDirection(..)
+             , PaddleInput(..)
+             , PaddleState(..)
+             , paddle
+             , drawPaddle
+             ) where
+
 import Control.Concurrent
 import Control.Arrow                      ( returnA, (>>>), arr, (&&&) )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent)
@@ -9,8 +16,9 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , rSwitch, accumHoldBy, edgeTag
                                           , repeatedly, edge, notYet, pre, never)
 import Graphics.Gloss                     ( Display (InWindow)
-                                          , Picture (Color,Translate,Pictures)
-                                          , circleSolid
+                                          , Picture (Color,Translate)
+                                          , Color
+                                          , rectangleSolid
                                           , white
                                           , black
                                           , display
@@ -21,14 +29,39 @@ import Debug.Trace (trace)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Linear.V2   ( V2 (V2) )
 
-import Ball (BallState(..), Collision, Score, vertical, horizontal, ball, drawBall)
 import Types (v2x, v2y)
-import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(PaddleState), paddle, drawPaddle)
+
+data PaddleDirection = PaddleUp | PaddleDown | PaddleStop
+
+class PaddleInput a where
+  paddleDirection :: a -> PaddleDirection
+
+data PaddleState = PaddleState {
+  pP :: V2 Float,
+  pV :: Float,
+  pS :: V2 Float,
+  pColor :: Color
+}
+
+paddle :: (PaddleInput a) => PaddleState -> SF a PaddleState
+paddle initial = proc pi -> do
+  y <- integral -< (pV initial) * (v $ paddleDirection pi)
+  returnA -< initial {pP = (V2 0 y) + pP initial}
+  where
+    v PaddleUp = 1
+    v PaddleStop = 0
+    v PaddleDown = -1
+
+drawPaddle :: PaddleState -> Picture
+drawPaddle (PaddleState (V2 x y) _ (V2 w h) color) = Color color $ Translate x y $ rectangleSolid w h
+
+-- Example
+
+examplePaddle = paddle $ PaddleState (V2 0 0) 200 (V2 20 60) black
 
 data GameInput = GameInput {
   keyUp :: G.KeyState,
-  keyDown :: G.KeyState,
-  screenSize :: V2 Int
+  keyDown :: G.KeyState
 } deriving Show
 
 instance PaddleInput GameInput where
@@ -37,42 +70,20 @@ instance PaddleInput GameInput where
   paddleDirection GameInput{keyUp = G.Up, keyDown = G.Down}   = PaddleDown
   paddleDirection _ = PaddleStop
 
-wallCollision :: Collision (GameInput, BallState)
-wallCollision = proc (gi, bs) -> do
-  let y = (fromIntegral . v2y . screenSize) gi
-  c <- edgeTag vertical -< abs (v2y $ bP bs) + 10 >= y/2
-  returnA -< c
-
-score :: Score (GameInput, BallState)
-score = proc (gi, bs) -> do
-  let x = (fromIntegral . v2x . screenSize) gi
-  s <- edge -< abs (v2x $ bP bs) - 10 >= x/2
-  returnA -< s
-
-ball' :: SF GameInput BallState
-ball' = ball (BallState (V2 0 0) (V2 50 100) black) wallCollision (score >>> pre)
-
 parseGameInput :: GameInput -> InputEvent -> GameInput
 -- parseGameInput gi i | trace ((show gi) ++ " " ++ show i) False = undefined
 parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Down _ _)   = gi { keyUp = G.Down }
 parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Up _ _)     = gi { keyUp = G.Up }
 parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyDown) G.Down _ _) = gi { keyDown = G.Down }
 parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyDown) G.Up _ _)   = gi { keyDown = G.Up }
-parseGameInput gi (G.EventResize (x, y)) = gi {screenSize = V2 x y}
 parseGameInput gi _ = gi
 
 input :: SF (Event InputEvent) GameInput
-input = accumHoldBy parseGameInput $ GameInput G.Up G.Up (V2 100 100)
-
-game :: SF GameInput Picture
-game = proc gi -> do
-  b <- ball' -< gi
-  p <- paddle $ PaddleState (V2 0 0) 200 (V2 20 60) black -< gi
-  returnA -< Pictures [(drawBall b), (drawPaddle p)]
+input = accumHoldBy parseGameInput $ GameInput G.Up G.Up
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 60
 
 main :: IO ()
-main = defaultPlay $ input >>> game
+main = defaultPlay $ input >>> examplePaddle >>> (arr drawPaddle)
 
