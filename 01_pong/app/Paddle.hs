@@ -31,10 +31,11 @@ import Linear.V2   ( V2 (V2) )
 
 import Types (v2x, v2y)
 
-data PaddleDirection = PaddleUp | PaddleDown | PaddleStop
+data PaddleDirection = PaddleUp | PaddleDown | PaddleStop deriving Show
 
-class PaddleInput a where
-  paddleDirection :: a -> PaddleDirection
+data PaddleInput = PaddleInput {
+  paddleDirection :: PaddleDirection
+}
 
 data PaddleState = PaddleState {
   pP :: V2 Float,
@@ -43,8 +44,8 @@ data PaddleState = PaddleState {
   pColor :: Color
 }
 
-paddle :: (PaddleInput a) => PaddleState -> SF a PaddleState
-paddle initial = proc pi -> do
+paddle' :: PaddleState -> SF PaddleInput PaddleState
+paddle' initial = proc pi -> do
   y <- integral -< (pV initial) * (v $ paddleDirection pi)
   returnA -< initial {pP = (V2 0 y) + pP initial}
   where
@@ -52,23 +53,33 @@ paddle initial = proc pi -> do
     v PaddleStop = 0
     v PaddleDown = -1
 
+paddle :: PaddleState -> SF (a, PaddleState) PaddleInput -> SF a PaddleState
+paddle initial pi = proc i -> do
+  rec
+    pi <- pi -< (i, ps)
+    ps <- paddle' initial -< pi
+  returnA -< ps
+
 drawPaddle :: PaddleState -> Picture
 drawPaddle (PaddleState (V2 x y) _ (V2 w h) color) = Color color $ Translate x y $ rectangleSolid w h
 
 -- Example
 
-examplePaddle = paddle $ PaddleState (V2 0 0) 200 (V2 20 60) black
+examplePaddle = paddle (PaddleState (V2 0 0) 200 (V2 20 60) black) examplePaddleInput
 
 data GameInput = GameInput {
   keyUp :: G.KeyState,
   keyDown :: G.KeyState
 } deriving Show
 
-instance PaddleInput GameInput where
-  paddleDirection GameInput{keyUp = G.Down, keyDown = G.Up}   = PaddleUp
-  paddleDirection GameInput{keyUp = G.Down, keyDown = G.Down} = PaddleStop
-  paddleDirection GameInput{keyUp = G.Up, keyDown = G.Down}   = PaddleDown
-  paddleDirection _ = PaddleStop
+examplePaddleInput :: SF (GameInput, a) PaddleInput
+examplePaddleInput = proc (gi, _) -> do
+  returnA -< PaddleInput $ d gi
+  where
+    d GameInput{keyUp = G.Down, keyDown = G.Up}   = PaddleUp
+    d GameInput{keyUp = G.Down, keyDown = G.Down} = PaddleStop
+    d GameInput{keyUp = G.Up, keyDown = G.Down}   = PaddleDown
+    d _ = PaddleStop
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 -- parseGameInput gi i | trace ((show gi) ++ " " ++ show i) False = undefined

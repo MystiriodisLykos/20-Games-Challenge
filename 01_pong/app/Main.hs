@@ -20,10 +20,11 @@ import Debug.Trace (trace)
 
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Linear.V2   ( V2 (V2) )
+import Control.Applicative ((<|>))
 
 import Ball (BallState(..), Collision, Score, vertical, horizontal, ball, drawBall)
 import Types (v2x, v2y)
-import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(PaddleState), paddle, drawPaddle)
+import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(PaddleState, pP), paddle, drawPaddle)
 
 data GameInput = GameInput {
   keyUp :: G.KeyState,
@@ -31,11 +32,15 @@ data GameInput = GameInput {
   screenSize :: V2 Int
 } deriving Show
 
-instance PaddleInput GameInput where
-  paddleDirection GameInput{keyUp = G.Down, keyDown = G.Up}   = PaddleUp
-  paddleDirection GameInput{keyUp = G.Down, keyDown = G.Down} = PaddleStop
-  paddleDirection GameInput{keyUp = G.Up, keyDown = G.Down}   = PaddleDown
-  paddleDirection _ = PaddleStop
+paddleInput :: SF (GameInput, PaddleState) PaddleInput
+paddleInput = proc (gi, ps) -> do
+  -- TODO: stop paddle when it reaches the top of the screen
+  returnA -< PaddleInput $ d gi
+  where
+    d GameInput{keyUp = G.Down, keyDown = G.Up}   = PaddleUp
+    d GameInput{keyUp = G.Down, keyDown = G.Down} = PaddleStop
+    d GameInput{keyUp = G.Up, keyDown = G.Down}   = PaddleDown
+    d _ = PaddleStop
 
 wallCollision :: Collision (GameInput, BallState)
 wallCollision = proc (gi, bs) -> do
@@ -52,6 +57,8 @@ score = proc (gi, bs) -> do
 ball' :: SF GameInput BallState
 ball' = ball (BallState (V2 0 0) (V2 50 100) black) wallCollision (score >>> pre)
 
+paddle' = paddle (PaddleState (V2 0 0) 200 (V2 20 60) black) paddleInput
+
 parseGameInput :: GameInput -> InputEvent -> GameInput
 -- parseGameInput gi i | trace ((show gi) ++ " " ++ show i) False = undefined
 parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Down _ _)   = gi { keyUp = G.Down }
@@ -67,7 +74,7 @@ input = accumHoldBy parseGameInput $ GameInput G.Up G.Up (V2 100 100)
 game :: SF GameInput Picture
 game = proc gi -> do
   b <- ball' -< gi
-  p <- paddle $ PaddleState (V2 0 0) 200 (V2 20 60) black -< gi
+  p <- paddle' -< gi
   returnA -< Pictures [(drawBall b), (drawPaddle p)]
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
