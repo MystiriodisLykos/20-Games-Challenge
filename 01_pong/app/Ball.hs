@@ -69,6 +69,7 @@ pongBall initial = switch ball pongBall
     ball = proc bi -> do
       v <- accumHold $ bV initial -< bBounce bi
       p <- integral -< v
+      -- Score event needs to be delayed to prevent infinite switching
       s <- notYet -< bReset bi
       let bs = initial {bP = p + bP initial}
       returnA -< (bs, s `tag` initial {bV = v})

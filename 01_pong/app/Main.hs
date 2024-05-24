@@ -50,12 +50,15 @@ wallCollision = proc (gi, bs) -> do
 
 score :: Score (GameInput, BallState)
 score = proc (gi, bs) -> do
-  let x = (fromIntegral . v2x . screenSize) gi
-  s <- edge -< abs (v2x $ bP bs) - 10 >= x/2
+  let w = (fromIntegral . v2x . screenSize) gi
+      x = (abs (v2x $ bP bs)) - 10
+  s <- edge -< x >= w/2
   returnA -< s
 
 ball' :: SF GameInput BallState
 ball' = ball (BallState (V2 0 0) (V2 50 100) black) wallCollision (score >>> pre)
+-- TODO: why does `score` need to be delayed with `pre` when the ball function
+-- delays the score with `notYet`
 
 paddle' = paddle (PaddleState (V2 0 0) 200 (V2 20 60) black) paddleInput
 
