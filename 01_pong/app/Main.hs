@@ -6,8 +6,8 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , integral, reactimate, now
                                           , constant, event, tag, hold
                                           , mapFilterE, dHold, identity
-                                          , rSwitch, accumHoldBy, edgeTag
-                                          , repeatedly, edge, notYet, pre, never)
+                                          , rSwitch, accumHoldBy, edgeTag, mergeBy
+                                          , repeatedly, edge, notYet, iPre, never)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Color,Translate,Pictures)
                                           , circleSolid
@@ -22,7 +22,7 @@ import qualified Graphics.Gloss.Interface.IO.Game as G
 import Linear.V2   ( V2 (V2) )
 import Control.Applicative ((<|>))
 
-import Ball (BallState(..), Collision, Score, vertical, horizontal, ball, drawBall)
+import Ball (BallState(..), BallInput(..), Bounce, vertical, horizontal, ball, drawBall)
 import Types (v2x, v2y)
 import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(PaddleState, pP), paddle, drawPaddle)
 
@@ -42,25 +42,34 @@ paddleInput = proc (gi, ps) -> do
     d GameInput{keyUp = G.Up, keyDown = G.Down}   = PaddleDown
     d _ = PaddleStop
 
-wallCollision :: Collision (GameInput, BallState)
+wallCollision :: SF (GameInput, BallState) (Event Bounce)
 wallCollision = proc (gi, bs) -> do
   let y = (fromIntegral . v2y . screenSize) gi
   c <- edgeTag vertical -< abs (v2y $ bP bs) + 10 >= y/2
   returnA -< c
 
-score :: Score (GameInput, BallState)
+score :: SF (GameInput, BallState) (Event ())
 score = proc (gi, bs) -> do
   let w = (fromIntegral . v2x . screenSize) gi
       x = (abs (v2x $ bP bs)) - 10
   s <- edge -< x >= w/2
   returnA -< s
 
-ball' :: SF GameInput BallState
-ball' = ball (BallState (V2 0 0) (V2 50 100) black) wallCollision (score >>> pre)
--- TODO: why does `score` need to be delayed with `pre` when the ball function
--- delays the score with `notYet`
+ballInput :: SF ((GameInput, PaddleState), BallState) BallInput
+ballInput = proc ((gi, pi), bs) -> do
+  wc <- wallCollision -< (gi, bs)
+  s <- score -< (gi, bs)
+  s' <- iPre NoEvent -< s
+  -- TODO: why does `score` need to be delayed with `pre` when the ball function
+  -- delays the score with `notYet`
+  returnA -< BallInput (cs wc $ s `tag` horizontal) s'
+  where
+    cs = mergeBy (.)
 
-paddle' = paddle (PaddleState (V2 0 0) 200 (V2 20 60) black) paddleInput
+ball' :: SF (GameInput, PaddleState) BallState
+ball' = ball (BallState (V2 0 0) (V2 100 200) black) ballInput
+
+paddle' = paddle (PaddleState (V2 200 0) 200 (V2 20 60) black) paddleInput
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 -- parseGameInput gi i | trace ((show gi) ++ " " ++ show i) False = undefined
@@ -76,12 +85,12 @@ input = accumHoldBy parseGameInput $ GameInput G.Up G.Up (V2 100 100)
 
 game :: SF GameInput Picture
 game = proc gi -> do
-  b <- ball' -< gi
   p <- paddle' -< gi
+  b <- ball' -< (gi, p)
   returnA -< Pictures [(drawBall b), (drawPaddle p)]
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
-defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 60
+defaultPlay = playYampa (InWindow "YampaDemo" (500, 250) (200, 200)) white 60
 
 main :: IO ()
 main = defaultPlay $ input >>> game

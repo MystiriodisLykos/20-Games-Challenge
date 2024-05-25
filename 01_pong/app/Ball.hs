@@ -3,8 +3,6 @@
 module Ball ( BallState(..)
             , BallInput(..)
             , Bounce
-            , Collision
-            , Score
             , vertical
             , horizontal
             , ball
@@ -51,9 +49,6 @@ vertical v = bounce v (V2 0 1)
 horizontal :: Bounce
 horizontal v = bounce v (V2 1 0)
 
-type Collision a = SF a (Event Bounce)
-type Score a = SF a (Event ())
-
 -- Doesn't always work as expected when the surface
 -- vector is parallel or orthogonal to the vector
 -- in that case bounce twice
@@ -63,8 +58,8 @@ bounce a s = (norm a / norm b) *^ b
   where
     b = a - (2 * (dot a s) *^ s)
 
-pongBall :: BallState -> SF BallInput BallState
-pongBall initial = switch ball pongBall
+ball' :: BallState -> SF BallInput BallState
+ball' initial = switch ball ball'
   where
     ball = proc bi -> do
       v <- accumHold $ bV initial -< bBounce bi
@@ -74,29 +69,36 @@ pongBall initial = switch ball pongBall
       let bs = initial {bP = p + bP initial}
       returnA -< (bs, s `tag` initial {bV = v})
 
-ball :: BallState -> Collision (a, BallState) -> Score (a, BallState) -> SF a BallState
-ball initial c s = proc bi -> do
+ball :: BallState -> SF (a, BallState) BallInput -> SF a BallState
+ball initial bi = proc i -> do
   rec
-    c <- c -< (bi, bs)
-    s <- s -< (bi, bs)
-    bs <- pongBall initial -< BallInput c s
+    bi <- bi -< (i, bs)
+    bs <- ball' initial -< bi
   returnA -< bs
 
 drawBall :: BallState -> Picture
 drawBall (BallState (V2 x y)  _ color) = Color color $ Translate x y $ circleSolid 10
 
-exampleBallCollision :: Collision (a, BallState)
-exampleBallCollision = proc (_, bs) -> do
+-- Example
+
+exampleBallCollision :: SF BallState (Event Bounce)
+exampleBallCollision = proc bs -> do
   vc <- edgeTag vertical -< abs (v2y $ bP bs) >= 200
   hc <- edgeTag horizontal -< abs (v2x $ bP bs) >= 200
   let c = mergeBy (.) vc hc
   returnA -< c
 
-exampleBallScore :: Score a
-exampleBallScore = repeatedly 7 ()
+exampleBallScore :: SF a (Event ())
+exampleBallScore = repeatedly 20 ()
+
+exampleBallInput :: SF (a, BallState) BallInput
+exampleBallInput = proc (_, bs) -> do
+  c <- exampleBallCollision -< bs
+  s <- exampleBallScore -< bs
+  returnA -< BallInput c s
 
 exampleBall :: Color -> V2 Float -> SF a BallState
-exampleBall c vi = ball (BallState (V2 0 0) vi c) exampleBallCollision exampleBallScore
+exampleBall c vi = ball (BallState (V2 0 0) vi c) exampleBallInput
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "YampaDemo" (1280, 1050) (200, 200)) white 30
