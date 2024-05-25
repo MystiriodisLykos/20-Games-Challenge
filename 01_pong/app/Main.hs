@@ -1,30 +1,21 @@
 {-# LANGUAGE Arrows #-}
 
-import Control.Concurrent
-import Control.Arrow                      ( returnA, (>>>), arr, (&&&) )
-import FRP.Yampa                          ( SF, Event (Event, NoEvent)
-                                          , integral, reactimate, now
-                                          , constant, event, tag, hold
-                                          , mapFilterE, dHold, identity
-                                          , rSwitch, accumHoldBy, edgeTag, mergeBy
-                                          , repeatedly, edge, notYet, iPre, never)
+import Control.Arrow                      ( returnA, (>>>) )
+import FRP.Yampa                          ( SF, Event (NoEvent)
+                                          , tag
+                                          , accumHoldBy, edgeTag, mergeBy
+                                          , edge, iPre)
 import Graphics.Gloss                     ( Display (InWindow)
-                                          , Picture (Color,Translate,Pictures)
-                                          , circleSolid
+                                          , Picture (Pictures)
                                           , white
                                           , black
-                                          , display
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
-import Debug.Trace (trace)
-
+import Linear.V2 (V2 (V2))
 import qualified Graphics.Gloss.Interface.IO.Game as G
-import Linear.V2   ( V2 (V2) )
-import Control.Applicative ((<|>))
 
 import Ball (BallState(..), BallInput(..), Bounce, vertical, horizontal, ball, drawBall)
-import Types (v2x, v2y)
-import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(PaddleState, pP), paddle, drawPaddle)
+import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(PaddleState), paddle, drawPaddle)
 
 data GameInput = GameInput {
   keyUp :: G.KeyState,
@@ -44,19 +35,25 @@ paddleInput = proc (gi, ps) -> do
 
 wallCollision :: SF (GameInput, BallState) (Event Bounce)
 wallCollision = proc (gi, bs) -> do
-  let y = (fromIntegral . v2y . screenSize) gi
-  c <- edgeTag vertical -< abs (v2y $ bP bs) + 10 >= y/2
+  let
+    (V2 _ h) = screenSize gi
+    (V2 _ y) = bP bs
+  c <- edgeTag vertical -< abs y + 10 >= (fromIntegral h)/2
   returnA -< c
+  where
 
 score :: SF (GameInput, BallState) (Event ())
 score = proc (gi, bs) -> do
-  let w = (fromIntegral . v2x . screenSize) gi
-      x = (abs (v2x $ bP bs)) - 10
-  s <- edge -< x >= w/2
+  let
+    (V2 w _) = screenSize gi
+    (V2 x _) = bP bs
+  s <- edge -< (abs x) - 10 >= (fromIntegral w)/2
   returnA -< s
+  where
+
 
 ballInput :: SF ((GameInput, PaddleState), BallState) BallInput
-ballInput = proc ((gi, pi), bs) -> do
+ballInput = proc ((gi, ps), bs) -> do
   wc <- wallCollision -< (gi, bs)
   s <- score -< (gi, bs)
   s' <- iPre NoEvent -< s
@@ -69,14 +66,15 @@ ballInput = proc ((gi, pi), bs) -> do
 ball' :: SF (GameInput, PaddleState) BallState
 ball' = ball (BallState (V2 0 0) (V2 100 200) black) ballInput
 
+paddle' :: SF GameInput PaddleState
 paddle' = paddle (PaddleState (V2 200 0) 200 (V2 20 60) black) paddleInput
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 -- parseGameInput gi i | trace ((show gi) ++ " " ++ show i) False = undefined
-parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Down _ _)   = gi { keyUp = G.Down }
-parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyUp) G.Up _ _)     = gi { keyUp = G.Up }
-parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyDown) G.Down _ _) = gi { keyDown = G.Down }
-parseGameInput gi (G.EventKey k@(G.SpecialKey G.KeyDown) G.Up _ _)   = gi { keyDown = G.Up }
+parseGameInput gi (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _)   = gi { keyUp = G.Down }
+parseGameInput gi (G.EventKey (G.SpecialKey G.KeyUp) G.Up _ _)     = gi { keyUp = G.Up }
+parseGameInput gi (G.EventKey (G.SpecialKey G.KeyDown) G.Down _ _) = gi { keyDown = G.Down }
+parseGameInput gi (G.EventKey (G.SpecialKey G.KeyDown) G.Up _ _)   = gi { keyDown = G.Up }
 parseGameInput gi (G.EventResize (x, y)) = gi {screenSize = V2 x y}
 parseGameInput gi _ = gi
 
