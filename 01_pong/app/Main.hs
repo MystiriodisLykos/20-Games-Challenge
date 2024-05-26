@@ -65,10 +65,8 @@ paddleCollision = proc (ps, bs) -> do
   let
     p = minkRectangle (pP ps) (pS ps)
     b = minkCircle 10 (bP bs)
-  c <- edgeTag horizontal -< fromMaybe False (collision 10 p b) && infront bs ps
+  c <- edgeTag horizontal -< fromMaybe False (collision 10 p b) && (abs $ bP bs) <= (abs $ pP ps)
   returnA -< c
-  where
-    infront BallState{bP = (V2 b _)} PaddleState{pP = (V2 p _)} = abs b <= abs p
 
 score :: SF (GameInput, BallState) (Event ())
 score = proc (gi, bs) -> do
