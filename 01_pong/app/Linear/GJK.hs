@@ -1,4 +1,4 @@
-module Linear.GJK (minkCircle, minkRectangle) where
+module Linear.GJK (minkCircle, minkRectangle, minkPoly) where
 
 import GJK.Mink      (Mink(..))
 import GJK.Point     (Pt, dot)
@@ -25,14 +25,14 @@ polySupport list d =
     where
       pt (V2 x y) = (x, y)
 
-d :: V2 Float -> V2 Double
-d = fmap float2Double
-
 minkCircle :: Double -> V2 Float -> Mink (Double, V2 Double)
-minkCircle r p = ((r, d p), circleSupport)
+minkCircle r p = ((r, float2Double <$> p), circleSupport)
+
+minkPoly :: [V2 Float] -> Mink [V2 Double]
+minkPoly points = ((fmap float2Double) <$> points, polySupport)
 
 minkRectangle :: V2 Float -> V2 Float -> Mink [V2 Double]
-minkRectangle c s = (points (d c) (d s), polySupport)
+minkRectangle c s = minkPoly $ points c s
   where
-    points :: V2 Double -> V2 Double -> [V2 Double]
+    points :: V2 Float -> V2 Float -> [V2 Float]
     points c@(V2 x y) s@(V2 w h) = ((+) $ V2 (-w/2) (-h/2)) <$> [c, c + (V2 w 0), c + (V2 0 h), c + s]
