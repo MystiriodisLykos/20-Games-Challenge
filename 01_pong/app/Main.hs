@@ -29,8 +29,6 @@ data GameInput = GameInput {
   screenSize :: V2 Int
 } deriving Show
 
-data Score = SLeft | SRight deriving (Show, Eq)
-
 -- TODO: must be a better way to handle the input for 2 paddles
 paddle1Input :: SF (GameInput, PaddleState) PaddleInput
 paddle1Input = proc (gi, ps) -> do
@@ -44,7 +42,6 @@ paddle1Input = proc (gi, ps) -> do
 
 paddle2Input :: SF (GameInput, PaddleState) PaddleInput
 paddle2Input = proc (gi, ps) -> do
-  -- TODO: stop paddle when it reaches the top of the screen
   returnA -< PaddleInput $ d gi
   where
     d GameInput{keyW = G.Down, keyS = G.Up}   = PaddleUp
@@ -65,8 +62,10 @@ paddleCollision = proc (ps, bs) -> do
   let
     p = minkRectangle (pP ps) (pS ps)
     b = minkCircle 10 (bP bs)
-  c <- edgeTag horizontal -< fromMaybe False (collision 10 p b) && (abs $ bP bs) <= (abs $ pP ps)
+  c <- edgeTag horizontal -< fromMaybe False (collision 10 p b) && (bP bs) `infront` (pP ps)
   returnA -< c
+  where
+    infront a b = (abs a) <= (abs b)
 
 score :: SF (GameInput, BallState) (Event ())
 score = proc (gi, bs) -> do
@@ -81,9 +80,8 @@ ballInput = proc ((gi, ps), bs) -> do
   wc <- wallCollision -< (gi, bs)
   pc <- paddleCollision -< (ps, bs)
   s <- score -< (gi, bs)
-  s' <- iPre NoEvent -< s
-  -- TODO: why does `score` need to be delayed with `pre` when the ball function
-  -- delays the score with `notYet`
+  s' <- iPre NoEvent -< s `tag` ()
+  -- TODO: why does `score` need to be delayed with `pre`
   returnA -< BallInput (merge [wc, pc, s `tag` horizontal]) s'
   where
     merge :: [Event Bounce] -> Event Bounce
@@ -92,20 +90,21 @@ ballInput = proc ((gi, ps), bs) -> do
 ball' :: SF (GameInput, PaddleState) BallState
 ball' = ball (BallState (V2 0 0) (V2 200 400) black) ballInput
 
+paddle' p = paddle (PaddleState p 200 (V2 5 60) black)
+
 paddle1 :: SF GameInput PaddleState
-paddle1 = paddle (PaddleState (V2 200 0) 200 (V2 5 60) black) paddle1Input
+paddle1 = paddle' (V2 200 0) paddle1Input
 
 paddle2 :: SF GameInput PaddleState
-paddle2 = paddle (PaddleState (V2 (-200) 0) 200 (V2 5 60) black) paddle2Input
+paddle2 = paddle' (V2 (-200) 0) paddle2Input
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
--- parseGameInput gi i | trace ((show gi) ++ " " ++ show i) False = undefined
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _)   = gi { keyUp = G.Down }
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyUp) G.Up _ _)     = gi { keyUp = G.Up }
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyDown) G.Down _ _) = gi { keyDown = G.Down }
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyDown) G.Up _ _)   = gi { keyDown = G.Up }
-parseGameInput gi (G.EventKey (G.Char 'w') G.Down _ _)   = gi { keyW = G.Down }
-parseGameInput gi (G.EventKey (G.Char 'w') G.Up _ _)     = gi { keyW = G.Up }
+parseGameInput gi (G.EventKey (G.Char 'w') G.Down _ _) = gi { keyW = G.Down }
+parseGameInput gi (G.EventKey (G.Char 'w') G.Up _ _)   = gi { keyW = G.Up }
 parseGameInput gi (G.EventKey (G.Char 's') G.Down _ _) = gi { keyS = G.Down }
 parseGameInput gi (G.EventKey (G.Char 's') G.Up _ _)   = gi { keyS = G.Up }
 parseGameInput gi (G.EventResize (x, y)) = gi {screenSize = V2 x y}
@@ -119,13 +118,11 @@ game = proc gi -> do
   p1 <- paddle1 -< gi
   p2 <- paddle2 -< gi
   rec
-    b <- ball' -< (gi, if (s $ bP b) then p1 else p2)
+    b <- ball' -< (gi, if (bP b >= V2 0 0) then p1 else p2)
   returnA -< Pictures [(drawBall b), (drawPaddle p1), (drawPaddle p2)]
-  where
-    s (V2 x _) = x > 0
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
-defaultPlay = playYampa (InWindow "YampaDemo" (500, 250) (200, 200)) white 60
+defaultPlay = playYampa (InWindow "Pong" (500, 250) (200, 200)) white 60
 
 main :: IO ()
 main = defaultPlay $ input >>> game
