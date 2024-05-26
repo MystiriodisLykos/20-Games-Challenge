@@ -2,7 +2,7 @@
 
 import Control.Arrow                      ( returnA, (>>>) )
 import FRP.Yampa                          ( SF, Event (NoEvent)
-                                          , tag
+                                          , tag, catEvents
                                           , accumHoldBy, edgeTag, mergeBy
                                           , edge, iPre)
 import Graphics.Gloss                     ( Display (InWindow)
@@ -12,10 +12,14 @@ import Graphics.Gloss                     ( Display (InWindow)
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Linear.V2 (V2 (V2))
+import GJK.Collision (collision)
+import Data.Maybe (fromMaybe)
 import qualified Graphics.Gloss.Interface.IO.Game as G
+import Debug.Trace (trace)
 
 import Ball (BallState(..), BallInput(..), Bounce, vertical, horizontal, ball, drawBall)
-import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(PaddleState), paddle, drawPaddle)
+import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(..), paddle, drawPaddle)
+import Linear.GJK (minkCircle, minkRectangle)
 
 data GameInput = GameInput {
   keyUp :: G.KeyState,
@@ -40,7 +44,14 @@ wallCollision = proc (gi, bs) -> do
     (V2 _ y) = bP bs
   c <- edgeTag vertical -< abs y + 10 >= (fromIntegral h)/2
   returnA -< c
-  where
+
+paddleCollision :: SF (PaddleState, BallState) (Event Bounce)
+paddleCollision = proc (ps, bs) -> do
+  let
+    p = minkRectangle (pP ps) (pS ps)
+    b = minkCircle 10 (bP bs)
+  c <- edgeTag horizontal -< fromMaybe False $ collision 10 p b
+  returnA -< c
 
 score :: SF (GameInput, BallState) (Event ())
 score = proc (gi, bs) -> do
@@ -49,25 +60,25 @@ score = proc (gi, bs) -> do
     (V2 x _) = bP bs
   s <- edge -< (abs x) - 10 >= (fromIntegral w)/2
   returnA -< s
-  where
-
 
 ballInput :: SF ((GameInput, PaddleState), BallState) BallInput
 ballInput = proc ((gi, ps), bs) -> do
   wc <- wallCollision -< (gi, bs)
+  pc <- paddleCollision -< (ps, bs)
   s <- score -< (gi, bs)
   s' <- iPre NoEvent -< s
   -- TODO: why does `score` need to be delayed with `pre` when the ball function
   -- delays the score with `notYet`
-  returnA -< BallInput (cs wc $ s `tag` horizontal) s'
+  returnA -< BallInput (merge [wc, pc, s `tag` horizontal]) s'
   where
-    cs = mergeBy (.)
+    merge :: [Event Bounce] -> Event Bounce
+    merge = (fmap $ foldl1 (.)) . catEvents
 
 ball' :: SF (GameInput, PaddleState) BallState
 ball' = ball (BallState (V2 0 0) (V2 100 200) black) ballInput
 
 paddle' :: SF GameInput PaddleState
-paddle' = paddle (PaddleState (V2 200 0) 200 (V2 20 60) black) paddleInput
+paddle' = paddle (PaddleState (V2 200 0) 200 (V2 5 60) black) paddleInput
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 -- parseGameInput gi i | trace ((show gi) ++ " " ++ show i) False = undefined
