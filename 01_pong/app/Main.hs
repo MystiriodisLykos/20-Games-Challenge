@@ -30,25 +30,22 @@ data GameInput = GameInput {
   screenSize :: V2 Int
 } deriving Show
 
--- TODO: must be a better way to handle the input for 2 paddles
+type Score = Either () ()
+
+paddleD :: G.KeyState -> G.KeyState -> PaddleDirection
+paddleD G.Down G.Up = PaddleUp
+paddleD G.Down G.Down = PaddleStop
+paddleD G.Up G.Down = PaddleDown
+paddleD _ _ = PaddleStop
+
 paddle1Input :: SF (GameInput, PaddleState) PaddleInput
 paddle1Input = proc (gi, ps) -> do
   -- TODO: stop paddle when it reaches the top of the screen
-  returnA -< PaddleInput $ d gi
-  where
-    d GameInput{keyUp = G.Down, keyDown = G.Up}   = PaddleUp
-    d GameInput{keyUp = G.Down, keyDown = G.Down} = PaddleStop
-    d GameInput{keyUp = G.Up, keyDown = G.Down}   = PaddleDown
-    d _ = PaddleStop
+  returnA -< PaddleInput $ paddleD (keyUp gi) (keyDown gi)
 
 paddle2Input :: SF (GameInput, PaddleState) PaddleInput
 paddle2Input = proc (gi, ps) -> do
-  returnA -< PaddleInput $ d gi
-  where
-    d GameInput{keyW = G.Down, keyS = G.Up}   = PaddleUp
-    d GameInput{keyW = G.Down, keyS = G.Down} = PaddleStop
-    d GameInput{keyW = G.Up, keyS = G.Down}   = PaddleDown
-    d _ = PaddleStop
+  returnA -< PaddleInput $ paddleD (keyW gi) (keyS gi)
 
 wallCollision :: SF (GameInput, BallState) (Event Bounce)
 wallCollision = proc (gi, bs) -> do
