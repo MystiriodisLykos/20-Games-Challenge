@@ -15,7 +15,7 @@ import Linear.V2   ( V2 (V2) )
 
 import Linear.VectorSpace()
 
-data PaddleDirection = PaddleUp | PaddleDown | PaddleStop deriving Show
+data PaddleDirection = PaddleLeft | PaddleRight | PaddleStop deriving Show
 
 data PaddleInput = PaddleInput {
   paddleDirection :: PaddleDirection
@@ -30,12 +30,12 @@ data PaddleState = PaddleState {
 
 paddle' :: PaddleState -> SF PaddleInput PaddleState
 paddle' initial = proc pi' -> do
-  y <- integral -< (pV initial) * (v $ paddleDirection pi')
-  returnA -< initial {pP = (V2 0 y) + pP initial}
+  x <- integral -< (pV initial) * (v $ paddleDirection pi')
+  returnA -< initial {pP = (V2 x 0) + pP initial}
   where
-    v PaddleUp = 1
+    v PaddleRight = 1
     v PaddleStop = 0
-    v PaddleDown = -1
+    v PaddleLeft = -1
 
 paddle :: PaddleState -> SF (a, PaddleState) PaddleInput -> SF a PaddleState
 paddle initial pi' = proc i -> do
