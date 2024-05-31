@@ -2,7 +2,7 @@
 
 module Ball ( BallState(..), BallInput(..), Bounce
             , vertical, horizontal
-            , ball, drawBall
+            , ball, drawBall, ball'
             ) where
 
 import Control.Arrow                      ( returnA )

@@ -1,14 +1,15 @@
 {-# LANGUAGE Arrows #-}
 
 import Control.Arrow                      ( returnA, (>>>) )
-import FRP.Yampa                          ( SF, Event (NoEvent)
+import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , tag, catEvents
-                                          , accumHoldBy, edgeTag, mergeBy
-                                          , edge, iPre)
+                                          , accumHoldBy, edgeTag
+                                          , edge, iPre, merge)
 import Graphics.Gloss                     ( Display (InWindow)
-                                          , Picture (Pictures)
+                                          , Picture (Pictures, Translate)
                                           , white
                                           , black
+                                          , text
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Linear.V2 (V2 (V2))
@@ -17,7 +18,7 @@ import Data.Maybe (fromMaybe)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
-import Ball (BallState(..), BallInput(..), Bounce, vertical, horizontal, ball, drawBall)
+import Ball (BallState(..), BallInput(..), Bounce, vertical, horizontal, drawBall, ball')
 import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(..), paddle, drawPaddle)
 import Linear.GJK (minkCircle, minkRectangle)
 
@@ -67,28 +68,33 @@ paddleCollision = proc (ps, bs) -> do
   where
     infront a b = (abs a) <= (abs b)
 
-score :: SF (GameInput, BallState) (Event ())
+ballCollision :: SF (GameInput, PaddleState, PaddleState, BallState, Event a) (Event Bounce)
+ballCollision = proc (gi, p1, p2, b, s) -> do
+  wc <- wallCollision -< (gi, b)
+  pc <- paddleCollision -< (sP (bP b) p1 p2, b)
+  returnA -< merge' [wc, pc, s `tag` horizontal]
+  where
+    merge' = (fmap $ foldl1 (.)) . catEvents
+    sP p p1 p2 = if (p >= V2 0 0) then p1 else p2
+
+score :: SF (GameInput, BallState) (Event Score)
 score = proc (gi, bs) -> do
   let
     (V2 w _) = screenSize gi
     (V2 x _) = bP bs
-  s <- edge -< (abs x) - 10 >= (fromIntegral w)/2
-  returnA -< s
-
-ballInput :: SF ((GameInput, PaddleState), BallState) BallInput
-ballInput = proc ((gi, ps), bs) -> do
-  wc <- wallCollision -< (gi, bs)
-  pc <- paddleCollision -< (ps, bs)
-  s <- score -< (gi, bs)
-  s' <- iPre NoEvent -< s `tag` ()
-  -- TODO: why does `score` need to be delayed with `pre`
-  returnA -< BallInput (merge [wc, pc, s `tag` horizontal]) s'
+  l <- edgeTag $ Left () -< s x w
+  r <- edgeTag $ Right ()  -< s (-x) w
+  returnA -< merge l r
   where
-    merge :: [Event Bounce] -> Event Bounce
-    merge = (fmap $ foldl1 (.)) . catEvents
+    s x w = x > (fromIntegral w)/2
 
-ball' :: SF (GameInput, PaddleState) BallState
-ball' = ball (BallState (V2 0 0) (V2 200 400) black) ballInput
+scores :: SF (Event Score) (Int, Int)
+scores = proc s -> do
+  sc <- accumHoldBy s' (0, 0) -< s
+  returnA -< sc
+  where
+    s' (a, b) (Left _) = (a+1, b)
+    s' (a, b) (Right _) = (a, b+1)
 
 paddle' p = paddle (PaddleState p 200 (V2 5 60) black)
 
@@ -97,6 +103,8 @@ paddle1 = paddle' (V2 200 0) paddle1Input
 
 paddle2 :: SF GameInput PaddleState
 paddle2 = paddle' (V2 (-200) 0) paddle2Input
+
+ball = ball' (BallState (V2 0 0) (V2 200 400) black)
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyUp) G.Down _ _)   = gi { keyUp = G.Down }
@@ -113,13 +121,22 @@ parseGameInput gi _ = gi
 input :: SF (Event InputEvent) GameInput
 input = accumHoldBy parseGameInput $ GameInput G.Up G.Up G.Up G.Up (V2 100 100)
 
+drawScore :: (Int, Int) -> Picture
+-- drawScore (l, r) | (trace (show l ++ " " ++ show r) False) = undefined
+drawScore (l, r) = Pictures [Translate 50 0 $ text (show r), Translate (-100) 0 $ text (show l)]
+
 game :: SF GameInput Picture
 game = proc gi -> do
   p1 <- paddle1 -< gi
   p2 <- paddle2 -< gi
   rec
-    b <- ball' -< (gi, if (bP b >= V2 0 0) then p1 else p2)
-  returnA -< Pictures [(drawBall b), (drawPaddle p1), (drawPaddle p2)]
+    s <- score -< (gi, b)
+    s' <- iPre NoEvent -< s `tag` ()
+    -- TODO: why does `score` need to be delayed with `pre`
+    c <- ballCollision -< (gi, p1, p2, b, s)
+    b <- ball -< BallInput c s'
+  sc <- scores -< s
+  returnA -< Pictures [(drawBall b), (drawPaddle p1), (drawPaddle p2), (drawScore sc)]
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "Pong" (500, 250) (200, 200)) white 60
