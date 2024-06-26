@@ -25,8 +25,8 @@ polySupport list d =
     where
       pt (V2 x y) = (x, y)
 
-minkCircle :: Double -> V2 Float -> Mink (Double, V2 Double)
-minkCircle r p = ((r, float2Double <$> p), circleSupport)
+minkCircle :: Double -> V2 Double -> Mink (Double, V2 Double)
+minkCircle r p = ((r, p), circleSupport)
 
 minkPoly :: [V2 Float] -> Mink [V2 Double]
 minkPoly points = ((fmap float2Double) <$> points, polySupport)

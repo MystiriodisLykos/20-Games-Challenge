@@ -14,6 +14,8 @@ import Graphics.Gloss                     ( Color
                                           , circleSolid)
 import Linear.V2   ( V2 (V2) )
 
+import Control.Arrow
+
 import Linear.VectorSpace()
 
 -- TODO: add ball radius
