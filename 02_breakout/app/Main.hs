@@ -7,7 +7,9 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSp
                                           , accumHoldBy, edgeTag, repeatedly
                                           , edge, iPre, merge, integral)
 import Graphics.Gloss                     ( Display (InWindow)
-                                          , Picture (Pictures, Translate)
+                                          , Picture (Pictures, Translate, Color)
+                                          , Color
+                                          , circleSolid, polygon
                                           , white
                                           , black
                                           , text
@@ -22,76 +24,41 @@ import GHC.Float (double2Float, float2Double)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
-import Ball (BallState(..), BallInput(..), Bounce, vertical, horizontal, drawBall, ball')
-import Paddle (PaddleDirection(..), PaddleInput(..), PaddleState(..), paddle, drawPaddle)
 import Linear.GJK (minkCircle, minkRectangle)
+import Linear.VectorSpace ()
 
-data GameInput = GameInput {
-  keyLeft :: G.KeyState,
-  keyRight :: G.KeyState,
-  screenSize :: V2 Int
-} deriving Show
+-- reset :: SF (GameInput, BallState) (Event ())
+-- reset = proc (gi, bs) -> do
+--   let
+--     (V2 _ h) = screenSize gi
+--     (V2 _ y) = bP bs
+--   r <- edge -< (-y) > (fromIntegral h)/2
+--   returnA -< r
 
-type Score = Either () ()
-
-paddleD :: G.KeyState -> G.KeyState -> PaddleDirection
-paddleD G.Down G.Up = PaddleLeft
-paddleD G.Down G.Down = PaddleStop
-paddleD G.Up G.Down = PaddleRight
-paddleD _ _ = PaddleStop
-
-merge' :: [Event (a -> a)] -> Event (a -> a)
-merge' = (fmap $ foldl1 (.)) . catEvents
-
-paddleInput :: SF (GameInput, PaddleState) PaddleInput
-paddleInput = proc (gi, ps) -> do
-  -- TODO: stop paddle when it reaches the edge of screen
-  returnA -< PaddleInput $ paddleD (keyLeft gi) (keyRight gi)
-
-wallCollision :: SF (GameInput, BallState) (Event Bounce)
-wallCollision = proc (gi, bs) -> do
-  let
-    (V2 w h) = screenSize gi
-    (V2 x y) = bP bs
-  t <- edgeTag vertical -< y + 10 >= (int h)/2
-  l <- edgeTag horizontal -< x + 10 >= (int w)/2
-  r <- edgeTag horizontal -< (-x) + 10 >= (int w)/2
-  returnA -< merge' [t, l, r]
-  where
-    int = fromIntegral
-
-paddleCollision :: SF (PaddleState, BallState) (Event Bounce)
-paddleCollision = proc (ps, bs) -> do
-  let
-    p = minkRectangle (pP ps) (pS ps)
-    b = minkCircle 10 (V2 0 0)
-  c <- edgeTag vertical -< fromMaybe False (collision 10 p b) && (bP bs) `over` (pP ps)
-  returnA -< c
-  where
-    over (V2 _ a) (V2 _ b) = a <= b
-
-ballCollision :: SF (GameInput, PaddleState, BallState) (Event Bounce)
-ballCollision = proc (gi, p, b) -> do
-  wc <- wallCollision -< (gi, b)
-  pc <- paddleCollision -< (p, b)
-  returnA -< merge' [wc, pc]
-
-reset :: SF (GameInput, BallState) (Event ())
-reset = proc (gi, bs) -> do
-  let
-    (V2 _ h) = screenSize gi
-    (V2 _ y) = bP bs
-  r <- edge -< (-y) > (fromIntegral h)/2
-  returnA -< r
-
-paddle' :: SF GameInput PaddleState
-paddle' = paddle (PaddleState (V2 0 (-200)) 200 (V2 60 5) black) paddleInput
+-- paddle' :: SF GameInput PaddleState
+-- paddle' = paddle (PaddleState (V2 0 (-200)) 200 (V2 60 5) black) paddleInput
 
 type Pos = V2 Double
 type Vel = V2 Double
 
 type BounceV = Vel -> Vel
 type BounceE = Event BounceV
+
+type CircleMink = Mink (Double, Pos)
+type BallMink = CircleMink
+type RectangleMink = Mink [V2 Double]
+type PaddleMink = RectangleMink
+type BrickMink = RectangleMink
+
+type ScreenSize = V2 Int
+
+data VelDirection = VelForward | VelZero | VelBackward deriving (Show, Eq)
+
+data GameInput = GameInput {
+  keyLeft :: G.KeyState,
+  keyRight :: G.KeyState,
+  screenSize :: V2 Int
+} deriving Show
 
 -- Doesn't always work as expected when the surface
 -- vector is parallel or orthogonal to the vector
@@ -102,17 +69,14 @@ bounce s a = (norm a / norm b) *^ b
   where
     b = a - (2 * (dot a s) *^ s)
 
-vertical' :: BounceV
-vertical' = bounce $ V2 0 1
+mergeC :: [Event (a -> a)] -> Event (a -> a)
+mergeC = (fmap $ foldl1 (.)) . catEvents
 
-horizontal' :: BounceV
-horizontal' = bounce $ V2 1 0
+vertical :: BounceV
+vertical = bounce $ V2 0 1
 
-type CircleMink = Mink (Double, Pos)
-type BallMink = CircleMink
-type RectangleMink = Mink [V2 Double]
-type PaddleMink = RectangleMink
-type BrickMink = RectangleMink
+horizontal :: BounceV
+horizontal = bounce $ V2 1 0
 
 position :: Pos -> SF Vel Pos
 position p0 = integral >>^ ((+) p0)
@@ -120,46 +84,57 @@ position p0 = integral >>^ ((+) p0)
 bVelocity :: Vel -> SF BounceE Vel
 bVelocity v0 = accumHold v0
 
+-- mVelocity :: (Num a) => Vel -> SF a Vel
+-- mVelocity v0 = accumHold
+
+lVelocity :: Vel -> SF VelDirection Vel
+lVelocity v = arr (\d -> (d' d) * v)
+  where
+    d' VelForward = 1
+    d' VelBackward = -1
+    d' _ = 0
+
 collisionCircle :: Double -> SF Pos BallMink
 collisionCircle r = arr $ minkCircle r
 
--- flip size and position and switch to operating on doubles
+-- flip size and position and use doubles instead of floats
 minkRectangle' :: V2 Double -> V2 Double -> Mink [V2 Double]
-minkRectangle' s p = minkRectangle (double2Float <$> s) (double2Float <$> p)
+minkRectangle' s p = minkRectangle (double2Float <$> p) (double2Float <$> s)
 
 collisionRectangle :: V2 Double -> SF Pos (Mink [V2 Double])
 collisionRectangle s = arr $ minkRectangle' s
 
-wallBounce :: SF (BallMink, RectangleMink) BounceE
-wallBounce = repeatedly 3 horizontal'
+drawBall :: V2 Float -> Float -> Picture
+drawBall (V2 x y) = Translate x y . circleSolid
+
+drawRectangle :: [V2 Float] -> Picture
+drawRectangle = polygon . fmap (\(V2 x y) -> (x, y))
+
+wallBounce :: SF (CircleMink, ScreenSize) BounceE
+wallBounce = proc (((r, (V2 x y)), _) , (V2 w h)) -> do
+  t <- edgeTag vertical -< y + r >= (int h)/2
+  l <- edgeTag horizontal -< x + r >= (int w)/2
+  r <- edgeTag horizontal -< (-x) + r >= (int w)/2
+  returnA -< mergeC [t, l, r]
+  where
+    int = fromIntegral
 
 brickBounce :: SF (BallMink, [BrickMink]) (BounceE, Event Int)
-brickBounce = repeatedly 20 horizontal' &&& repeatedly 20 0
+brickBounce = repeatedly 20 horizontal &&& repeatedly 20 0
 
 paddleBounce :: SF (BallMink, PaddleMink) BounceE
-paddleBounce = repeatedly 2 vertical'
+paddleBounce = (fromMaybe False . collision') ^>> edgeTag vertical
+  where
+    collision' (a, b) = collision 10 a b
 
--- (>+>) :: Arrow a => a b c -> a c d -> a b (c, d)
--- (>+>) a b = a >>> ((arr id) &&& b)
--- infixr 4 >+>
-
--- goal
--- ball = (wallCollision &+& bricksCollision &+& paddleCollision) >>> velocity (V2 200 400) >>> position (V2 0 0)
--- I like this particular formulation for the ball, though I do need to add in a reset
--- It still requires that something else figures out what the ball actually bounces on, good
--- And returns all the needed information for other things to react to it.
--- Though the returning all the information that other things need to react to in this instance is kinda
--- hapenstance.
-ballTest :: SF BounceE BallMink
-ballTest = (bVelocity $ V2 50 50) >>> (position $ V2 0 0) >>> (collisionCircle 10)
+ball :: SF BounceE BallMink
+ball = (bVelocity $ V2 50 (-100)) >>> (position $ V2 0 0) >>> (collisionCircle 8)
 
 -- brickTest :: SF () BrickMink
 -- brickTest = (constant $ V2 0 0) >>> (position $ V2 20 20) >>> (collisionRectangle (V2 20 10))
 
-paddleTest :: SF Vel PaddleMink
-paddleTest = (position $ V2 (-100) 0) >>> (collisionRectangle $ V2 20 1)
-
-ball = ball' (BallState (V2 0 0) (V2 200 400) black)
+paddle :: SF VelDirection PaddleMink
+paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-100)) >>> (collisionRectangle $ V2 50 5)
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) G.Down _ _)   = gi { keyLeft = G.Down }
@@ -172,29 +147,36 @@ parseGameInput gi _ = gi
 input :: SF (Event InputEvent) GameInput
 input = accumHoldBy parseGameInput $ GameInput G.Up G.Up (V2 100 100)
 
-game :: SF GameInput Picture
-game = proc gi -> do
-  p <- paddle' -< gi
-  rec
-    r <- reset -< (gi, b)
-    r' <- iPre NoEvent -< r `tag` ()
-    -- TODO: why does `score` need to be delayed with `pre`
-    c <- ballCollision -< (gi, p, b)
-    b <- ball -< BallInput c r'
-  returnA -< Pictures [(drawBall b), (drawPaddle p)]
+paddleD :: G.KeyState -> G.KeyState -> VelDirection
+paddleD G.Down G.Up = VelForward
+paddleD G.Up G.Down = VelBackward
+paddleD _ _ = VelZero
+
+-- game :: SF GameInput Picture
+-- game = proc gi -> do
+--   p <- paddle' -< gi
+--   rec
+--     r <- reset -< (gi, b)
+--     r' <- iPre NoEvent -< r `tag` ()
+--     -- TODO: why does `score` need to be delayed with `pre`
+--     c <- ballCollision -< (gi, p, b)
+--     b <- ball -< BallInput c r'
+--   returnA -< Pictures [(drawBall b), (drawPaddle p)]
 
 -- I like this formulation where each bounce type is its own signal funciton
 -- Even though its a little harder to add a new thing to bounce off of it
 -- does provide more flexibility on how things bounce and that each type of
 -- bounce can bounce in a different way.
 game' :: SF GameInput Picture
-game' = proc _ -> do
+game' = proc gi -> do
   rec
-    wb <- wallBounce -< (b, 1)
+    wb <- wallBounce -< (b, screenSize gi)
     pb <- paddleBounce -< (b, p)
-    p <- paddleTest -< V2 0 0
-    b@((_, bp), _) <- ballTest -< merge' [wb, pb]
-  returnA -< drawBall $ BallState (double2Float <$> bp) (V2 0 0) black
+    p@(ps, _) <- paddle -< paddleD (keyRight gi) (keyLeft gi)
+    b@((r, bp), _) <- ball -< mergeC [wb, pb]
+  returnA -< Pictures [ drawBall (double2Float <$> bp) $ double2Float r
+                      , drawRectangle ((fmap double2Float) <$> ps)
+                      ]
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "Pong" (300, 500) (200, 200)) white 60
