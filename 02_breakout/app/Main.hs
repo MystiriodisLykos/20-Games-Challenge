@@ -5,7 +5,8 @@ import Control.Applicative                ( liftA2 )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^), dot, norm)
                                           , tag, catEvents, accumHold, constant
                                           , accumHoldBy, edgeTag, repeatedly
-                                          , edge, iPre, merge, integral)
+                                          , edge, iPre, merge, integral
+                                          , drSwitch )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate, Color)
                                           , Color
@@ -124,8 +125,10 @@ brickBounce = repeatedly 20 horizontal &&& repeatedly 20 0
 
 paddleBounce :: SF (BallMink, PaddleMink) BounceE
 paddleBounce = (fromMaybe False . collision') ^>> edgeTag vertical
-  where
-    collision' (a, b) = collision 10 a b
+  where collision' (a, b) = collision 10 a b
+
+ballReset :: SF (BallMink, ScreenSize) (Event ())
+ballReset = proc (((r, (V2 x y)), _) , (V2 w h)) -> edge -< y < -(fromIntegral h)/2
 
 ball :: SF BounceE BallMink
 ball = (bVelocity $ V2 50 (-100)) >>> (position $ V2 0 0) >>> (collisionCircle 8)
@@ -170,11 +173,12 @@ paddleD _ _ = VelZero
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
-    wb <- wallBounce -< (b, screenSize gi)
-    pb <- paddleBounce -< (b, p)
-    p@(ps, _) <- paddle -< paddleD (keyRight gi) (keyLeft gi)
-    b@((r, bp), _) <- ball -< mergeC [wb, pb]
-  returnA -< Pictures [ drawBall (double2Float <$> bp) $ double2Float r
+    wb              <- wallBounce    -< (b, screenSize gi)
+    r               <- ballReset     -< (b, screenSize gi)
+    pb              <- paddleBounce  -< (b, p)
+    p@(ps, _)       <- paddle        -< paddleD (keyRight gi) (keyLeft gi)
+    b@((br, bp), _) <- drSwitch ball -< (mergeC [wb, pb], r `tag` ball)
+  returnA -< Pictures [ drawBall (double2Float <$> bp) $ double2Float br
                       , drawRectangle ((fmap double2Float) <$> ps)
                       ]
 
