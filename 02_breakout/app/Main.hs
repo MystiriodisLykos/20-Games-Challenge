@@ -28,17 +28,6 @@ import Debug.Trace (trace)
 import Linear.GJK (minkCircle, minkRectangle)
 import Linear.VectorSpace ()
 
--- reset :: SF (GameInput, BallState) (Event ())
--- reset = proc (gi, bs) -> do
---   let
---     (V2 _ h) = screenSize gi
---     (V2 _ y) = bP bs
---   r <- edge -< (-y) > (fromIntegral h)/2
---   returnA -< r
-
--- paddle' :: SF GameInput PaddleState
--- paddle' = paddle (PaddleState (V2 0 (-200)) 200 (V2 60 5) black) paddleInput
-
 type Pos = V2 Double
 type Vel = V2 Double
 
@@ -85,9 +74,6 @@ position p0 = integral >>^ ((+) p0)
 bVelocity :: Vel -> SF BounceE Vel
 bVelocity v0 = accumHold v0
 
--- mVelocity :: (Num a) => Vel -> SF a Vel
--- mVelocity v0 = accumHold
-
 lVelocity :: Vel -> SF VelDirection Vel
 lVelocity v = arr (\d -> (d' d) * v)
   where
@@ -120,9 +106,6 @@ wallBounce = proc (((r, (V2 x y)), _) , (V2 w h)) -> do
   where
     int = fromIntegral
 
-brickBounce :: SF (BallMink, [BrickMink]) (BounceE, Event Int)
-brickBounce = repeatedly 20 horizontal &&& repeatedly 20 0
-
 paddleBounce :: SF (BallMink, PaddleMink) BounceE
 paddleBounce = (fromMaybe False . collision') ^>> edgeTag vertical
   where collision' (a, b) = collision 10 a b
@@ -132,9 +115,6 @@ ballReset = proc (((r, (V2 x y)), _) , (V2 w h)) -> edge -< y < -(fromIntegral h
 
 ball :: SF BounceE BallMink
 ball = (bVelocity $ V2 50 (-100)) >>> (position $ V2 0 0) >>> (collisionCircle 8)
-
--- brickTest :: SF () BrickMink
--- brickTest = (constant $ V2 0 0) >>> (position $ V2 20 20) >>> (collisionRectangle (V2 20 10))
 
 paddle :: SF VelDirection PaddleMink
 paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-100)) >>> (collisionRectangle $ V2 50 5)
@@ -155,21 +135,6 @@ paddleD G.Down G.Up = VelForward
 paddleD G.Up G.Down = VelBackward
 paddleD _ _ = VelZero
 
--- game :: SF GameInput Picture
--- game = proc gi -> do
---   p <- paddle' -< gi
---   rec
---     r <- reset -< (gi, b)
---     r' <- iPre NoEvent -< r `tag` ()
---     -- TODO: why does `score` need to be delayed with `pre`
---     c <- ballCollision -< (gi, p, b)
---     b <- ball -< BallInput c r'
---   returnA -< Pictures [(drawBall b), (drawPaddle p)]
-
--- I like this formulation where each bounce type is its own signal funciton
--- Even though its a little harder to add a new thing to bounce off of it
--- does provide more flexibility on how things bounce and that each type of
--- bounce can bounce in a different way.
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
