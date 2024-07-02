@@ -21,7 +21,7 @@ import GJK.Collision (collision)
 import GJK.Mink (Mink)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (Sum)
-import GHC.Float (double2Float, float2Double)
+import GHC.Float (double2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
@@ -84,18 +84,18 @@ lVelocity v = arr (\d -> (d' d) * v)
 collisionCircle :: Double -> SF Pos BallMink
 collisionCircle r = arr $ minkCircle r
 
--- flip size and position and use doubles instead of floats
+-- flip size and position arguments
 minkRectangle' :: V2 Double -> V2 Double -> Mink [V2 Double]
-minkRectangle' s p = minkRectangle (double2Float <$> p) (double2Float <$> s)
+minkRectangle' s p = minkRectangle p s
 
 collisionRectangle :: V2 Double -> SF Pos (Mink [V2 Double])
 collisionRectangle s = arr $ minkRectangle' s
 
-drawBall :: V2 Float -> Float -> Picture
-drawBall (V2 x y) = Translate x y . circleSolid
+drawBall :: V2 Double -> Double -> Picture
+drawBall (V2 x y) = Translate (double2Float x) (double2Float y) . circleSolid . double2Float
 
-drawRectangle :: [V2 Float] -> Picture
-drawRectangle = polygon . fmap (\(V2 x y) -> (x, y))
+drawRectangle :: [V2 Double] -> Picture
+drawRectangle = polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
 
 wallBounce :: SF (CircleMink, ScreenSize) BounceE
 wallBounce = proc (((r, (V2 x y)), _) , (V2 w h)) -> do
@@ -143,8 +143,8 @@ game' = proc gi -> do
     pb              <- paddleBounce  -< (b, p)
     p@(ps, _)       <- paddle        -< paddleD (keyRight gi) (keyLeft gi)
     b@((br, bp), _) <- drSwitch ball -< (mergeC [wb, pb], r `tag` ball)
-  returnA -< Pictures [ drawBall (double2Float <$> bp) $ double2Float br
-                      , drawRectangle ((fmap double2Float) <$> ps)
+  returnA -< Pictures [ drawBall bp br
+                      , drawRectangle ps
                       ]
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
