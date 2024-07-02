@@ -2,6 +2,7 @@ module Linear.GJK (minkCircle, minkRectangle, minkPoly) where
 
 import GJK.Mink      (Mink(..))
 import GJK.Point     (Pt, dot)
+import GJK.Support   (polySupport)
 import GHC.Float (float2Double)
 import Debug.Trace (trace)
 
@@ -14,23 +15,13 @@ circleSupport (r, (V2 x y)) d@(a,b) =
   in Just ((a*r/len+x),(b*r/len+y))
 
 
-polySupport :: [V2 Double] -> Pt -> Maybe Pt
-polySupport list d =
-    let
-        dotList = map (dot d . pt) list
-        decorated = zipWith (,) dotList list
-        max' = foldl1 (\a@(a_d, _) b@(b_d, _)-> if a_d>=b_d then a else b) decorated
-    in
-        case max' of
-          (m, p) -> Just $ pt p
-    where
-      pt (V2 x y) = (x, y)
-
 minkCircle :: Double -> V2 Double -> Mink (Double, V2 Double)
 minkCircle r p = ((r, p), circleSupport)
 
 minkPoly :: [V2 Float] -> Mink [V2 Double]
-minkPoly points = ((fmap float2Double) <$> points, polySupport)
+minkPoly points = ((fmap float2Double) <$> points, support)
+  where
+    support = polySupport . (fmap (\(V2 a b) -> (a, b)))
 
 minkRectangle :: V2 Float -> V2 Float -> Mink [V2 Double]
 minkRectangle c s = minkPoly $ points c s
