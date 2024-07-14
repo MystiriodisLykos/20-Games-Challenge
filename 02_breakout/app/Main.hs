@@ -234,7 +234,7 @@ game' = proc gi -> do
                         ] ++ (drawRectangle <$> fst <$> bs)
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
-defaultPlay = playYampa (InWindow "Pong" (300, 500) (200, 200)) white 60
+defaultPlay = playYampa (InWindow "Breakout" (300, 500) (200, 200)) white 60
 
 main :: IO ()
 main = defaultPlay $ input >>> game'
