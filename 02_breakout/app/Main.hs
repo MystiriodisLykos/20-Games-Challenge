@@ -6,7 +6,7 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSp
                                           , tag, catEvents, accumHold, constant, isEvent
                                           , accumHoldBy, edgeTag, repeatedly, gate, tagWith
                                           , edge, iPre, merge, integral, hold, dpSwitch, iPre
-                                          , drSwitch, edgeJust, parB, pSwitchB, event, delay )
+                                          , drSwitch, edgeJust, parB, pSwitchB, event, delay, dropEvents )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate, Color)
                                           , Color
@@ -145,7 +145,7 @@ brickBounces = proc (b, bs) -> do
     collision'' b (bp, _) = foldl (.) id $ bounces <$> (collisions $ segment <$> edges)
       where
         edges = zip bp (drop 1 $ cycle bp)
-        segment = uncurry minkSegment . (\es -> trace (show es) es)
+        segment = uncurry minkSegment -- . (\es -> trace (show es) es)
         collisions = filter (\a -> collision' (a, b))
         bounces ((a, b), _) = let v = (a-b) in bounce $ perp $ v ^/ norm v
 
@@ -183,10 +183,12 @@ brick s p = proc e -> do
 bricks :: [SF (Event ()) (Maybe BrickMink)] -> SF [Event a] [BrickMink]
 bricks bs0 = bricks' bs0 >>^ catMaybes
   where
-    bricks' bs = dpSwitch route bs (arr $ deadE . snd) c
+    bricks' bs = dpSwitch route bs kill cont
     route es = zip $ (fmap (tagWith ()) es) ++ repeat NoEvent
-    deadE = (\bs -> bool (Event bs) NoEvent (and bs)) . (fmap (not . null))
-    c sfs ds = bricks' $ filterByList ds sfs
+    kill = (coll . (fmap (not . null)) . snd) ^>> dropEvents 1
+    coll bs = bool (Event bs) NoEvent (and bs)
+    -- cont _ ds | (trace (show ds) False) = undefined
+    cont sfs ds = bricks' $ filterByList ds sfs
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) G.Down _ _)   = gi { keyLeft = G.Down }
