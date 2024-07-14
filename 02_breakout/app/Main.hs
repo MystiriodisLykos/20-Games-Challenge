@@ -5,7 +5,7 @@ import Control.Applicative                ( liftA2 )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^))
                                           , tag, catEvents, accumHold, constant, isEvent
                                           , accumHoldBy, edgeTag, repeatedly, gate, tagWith
-                                          , edge, iPre, merge, integral, hold, dpSwitch, iPre
+                                          , edge, iPre, merge, integral, hold, pSwitch, iPre
                                           , drSwitch, edgeJust, parB, pSwitchB, event, delay, dropEvents )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate, Color)
@@ -175,19 +175,10 @@ brick s p = proc e -> do
   c <- hold Just -< e `tag` (const Nothing)
   returnA -< c bm
 
--- arrList :: SF a b -> SF [a] [b]
--- arrList sf = 
-
--- cat' :: SF a b -> SF a b -> SF [a] [b]
--- cat' a b = 
-
--- flat' :: [SF a b] -> SF [a] [b]
--- flat' sfs = undefined
-
 bricks :: [SF (Event ()) (Maybe BrickMink)] -> SF [Event a] [BrickMink]
 bricks bs0 = bricks' bs0 >>^ catMaybes
   where
-    bricks' bs = dpSwitch route bs kill cont
+    bricks' bs = pSwitch route bs kill cont
     route es = zip $ (fmap (tagWith ()) es) ++ repeat NoEvent
     kill = (coll . (fmap (not . null)) . snd) ^>> dropEvents 1
     coll bs = bool (Event bs) NoEvent (and bs)
