@@ -137,8 +137,7 @@ brickCollisions = proc (b, bs) -> do
 
 brickBounces :: SF (BallMink, [Event BrickMink]) BounceE
 brickBounces = proc (b, bs) -> do
-  -- TODO: use catEvents
-  returnA -< mergeC $ Event <$> collision'' b <$> (catMaybes $ eventToMaybe <$> bs)
+  returnA -< mergeC $ (fmap $ collision'' b) <$> bs
   where
     -- TODO: break this out
     collision'' :: BallMink -> BrickMink -> BounceV
