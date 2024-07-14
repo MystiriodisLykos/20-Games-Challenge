@@ -152,8 +152,13 @@ brickBounces = proc (b, bs) -> do
 ballReset :: SF (BallMink, ScreenSize) (Event ())
 ballReset = proc (((r, (V2 x y)), _) , (V2 w h)) -> edge -< y < -(fromIntegral h)/2
 
+acc :: SF Vel Vel
+acc = proc v -> do
+  a <- integral -< 0.05
+  returnA -< (1 + a) * v
+
 ball :: SF BounceE BallMink
-ball = (bVelocity $ V2 50 (-100)) >>> (position $ V2 0 0) >>> (collisionCircle 8)
+ball = (bVelocity $ V2 50 (-100)) >>> acc >>> (position $ V2 0 (-50)) >>> (collisionCircle 8)
 
 paddle :: SF VelDirection PaddleMink
 paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-100)) >>> (collisionRectangle $ V2 50 5)
