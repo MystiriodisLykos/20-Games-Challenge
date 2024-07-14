@@ -215,15 +215,15 @@ paddleD _ _ = VelZero
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
-    r               <- ballReset       -< (b, screenSize gi)
-    bcs             <- brickCollisions -< (b, bs)
-    dbcs            <- iPre []         -< bcs
-    wb              <- wallBounce      -< (b, screenSize gi)
-    pb              <- paddleBounce    -< (b, p)
-    bb              <- brickBounces    -< (b, bcs)
-    p@(ps, _)       <- paddle          -< paddleD (keyRight gi) (keyLeft gi)
-    b@((br, bp), _) <- drSwitch ball   -< (mergeC [wb, pb, bb], r `tag` ball)
-    bs              <- bricks1         -< dbcs
+    r               <- ballReset        -< (b, screenSize gi)
+    bcs             <- brickCollisions  -< (b, bs)
+    dbcs            <- iPre []          -< bcs
+    wb              <- wallBounce       -< (b, screenSize gi)
+    pb              <- paddleBounce     -< (b, p)
+    bb              <- brickBounces     -< (b, bcs)
+    p@(ps, _)       <- paddle           -< paddleD (keyRight gi) (keyLeft gi)
+    b@((br, bp), _) <- drSwitch ball    -< (mergeC [wb, pb, bb], r `tag` ball)
+    bs              <- drSwitch bricks1 -< (dbcs, r `tag` bricks1)
   returnA -< Pictures $ [ drawBall bp br
                         , drawRectangle ps
                         ] ++ (drawRectangle <$> fst <$> bs)
