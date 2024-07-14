@@ -1,12 +1,12 @@
 {-# LANGUAGE Arrows #-}
 
-import Control.Arrow                      ( Arrow, returnA, (>>>), (^>>), (>>^), (&&&), arr )
+import Control.Arrow                      ( Arrow, returnA, (>>>), (^>>), (>>^), (&&&), arr, first )
 import Control.Applicative                ( liftA2 )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^), dot, norm)
-                                          , tag, catEvents, accumHold, constant
-                                          , accumHoldBy, edgeTag, repeatedly
-                                          , edge, iPre, merge, integral
-                                          , drSwitch )
+                                          , tag, catEvents, accumHold, constant, isEvent
+                                          , accumHoldBy, edgeTag, repeatedly, gate
+                                          , edge, iPre, merge, integral, hold
+                                          , drSwitch, edgeJust, parB, pSwitchB, event )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate, Color)
                                           , Color
@@ -19,13 +19,13 @@ import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Linear.V2 (V2 (V2))
 import GJK.Collision (collision)
 import GJK.Mink (Mink)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, catMaybes)
 import Data.Monoid (Sum)
 import GHC.Float (double2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
-import Linear.GJK (minkCircle, minkRectangle)
+import Linear.GJK (minkCircle, minkRectangle, minkSegment)
 import Linear.VectorSpace ()
 
 type Pos = V2 Double
@@ -81,6 +81,12 @@ lVelocity v = arr (\d -> (d' d) * v)
     d' VelBackward = -1
     d' _ = 0
 
+eventToMaybe :: Event a -> Maybe a
+eventToMaybe = event Nothing Just
+
+collision' :: (Mink a, Mink b) -> Bool
+collision' = (fromMaybe False) . uncurry (collision 10)
+
 collisionCircle :: Double -> SF Pos BallMink
 collisionCircle r = arr $ minkCircle r
 
@@ -107,8 +113,32 @@ wallBounce = proc (((r, (V2 x y)), _) , (V2 w h)) -> do
     int = fromIntegral
 
 paddleBounce :: SF (BallMink, PaddleMink) BounceE
-paddleBounce = (fromMaybe False . collision') ^>> edgeTag vertical
-  where collision' (a, b) = collision 10 a b
+paddleBounce = collision' ^>> edgeTag vertical
+
+brickCollision :: SF (BallMink, BrickMink) Bool
+brickCollision = arr collision'
+
+-- fLift :: (Arrow a, Functor f) => a b c -> a (f b) (f c)
+-- fLift a = proc bs -> do
+--   returnA -< a <$ bs
+
+brickCollisions :: SF (BallMink, [BrickMink]) [Event BrickMink]
+brickCollisions = proc (b, bs) -> do
+  returnA -< (\k -> (Event k) `gate` collision' (b, k) ) <$> bs
+
+brickBounces :: SF (BallMink, [Event BrickMink]) BounceE
+brickBounces = proc (b, bs) -> do
+  -- TODO: use catEvents
+  returnA -< mergeC $ Event <$> collision'' b <$> (catMaybes $ eventToMaybe <$> bs)
+  where
+    -- TODO: break this out
+    collision'' :: BallMink -> BrickMink -> BounceV
+    collision'' b (bp, _) = foldl (.) id $ bounces <$> (collisions $ segment <$> edges)
+      where
+        edges = zip bp (drop 1 $ cycle bp)
+        segment = uncurry minkSegment
+        collisions = filter (\a -> collision' (a, b))
+        bounces ((a, b), _) = bounce $ a - b
 
 ballReset :: SF (BallMink, ScreenSize) (Event ())
 ballReset = proc (((r, (V2 x y)), _) , (V2 w h)) -> edge -< y < -(fromIntegral h)/2
@@ -118,6 +148,38 @@ ball = (bVelocity $ V2 50 (-100)) >>> (position $ V2 0 0) >>> (collisionCircle 8
 
 paddle :: SF VelDirection PaddleMink
 paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-100)) >>> (collisionRectangle $ V2 50 5)
+
+-- brick :: Pos -> SF BallMink (Maybe BrickMink)
+-- brick p = proc b -> do
+--   bm <- collisionRectangle $ V2 50 20 -< p
+--   c <- edge -< collision' (bm, b)
+--   c' <- hold Nothing -< Event $ event (Just bm) (const Nothing) c
+--   returnA -< c'
+
+brick :: Pos -> SF (Event ()) (Maybe BrickMink)
+brick p = proc e -> do
+  bm <- collisionRectangle $ V2 50 20 -< p
+  c <- hold Just -< e `tag` (const Nothing)
+  returnA -< c bm
+
+bricks :: [SF BallMink (Maybe BrickMink)] -> SF BallMink [BrickMink]
+bricks bs = parB bs >>^ catMaybes
+
+-- arrList :: SF a b -> SF [a] [b]
+-- arrList sf = 
+
+-- cat' :: SF a b -> SF a b -> SF [a] [b]
+-- cat' a b = 
+
+-- flat' :: [SF a b] -> SF [a] [b]
+-- flat' sfs = undefined
+
+bricks'' :: [SF (Event ()) (Maybe BrickMink)] -> SF [Event BrickMink] [BrickMink]
+bricks'' bs0 = undefined
+  -- proc bcs -> do
+  -- rec
+  --   bs <- hold bs0 -< filterByList
+  -- (event True (const False)) <$> bcs
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) G.Down _ _)   = gi { keyLeft = G.Down }
@@ -138,18 +200,20 @@ paddleD _ _ = VelZero
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
-    wb              <- wallBounce    -< (b, screenSize gi)
-    r               <- ballReset     -< (b, screenSize gi)
-    pb              <- paddleBounce  -< (b, p)
-    p@(ps, _)       <- paddle        -< paddleD (keyRight gi) (keyLeft gi)
-    b@((br, bp), _) <- drSwitch ball -< (mergeC [wb, pb], r `tag` ball)
-  returnA -< Pictures [ drawBall bp br
-                      , drawRectangle ps
-                      ]
+    r               <- ballReset       -< (b, screenSize gi)
+    bcs             <- brickCollisions -< (b, bs)
+    wb              <- wallBounce      -< (b, screenSize gi)
+    pb              <- paddleBounce    -< (b, p)
+    bb              <- brickBounces    -< (b, bcs)
+    p@(ps, _)       <- paddle          -< paddleD (keyRight gi) (keyLeft gi)
+    b@((br, bp), _) <- drSwitch ball   -< (mergeC [wb, pb], r `tag` ball)
+    bs              <- bricks [constant NoEvent >>> brick (V2 120 120)] -< b
+  returnA -< Pictures $ [ drawBall bp br
+                        , drawRectangle ps
+                        ] ++ (drawRectangle <$> fst <$> bs)
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "Pong" (300, 500) (200, 200)) white 60
 
 main :: IO ()
 main = defaultPlay $ input >>> game'
-
