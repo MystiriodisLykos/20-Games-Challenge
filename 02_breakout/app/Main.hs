@@ -2,11 +2,11 @@
 
 import Control.Arrow                      ( Arrow, returnA, (>>>), (^>>), (>>^), (&&&), arr, first )
 import Control.Applicative                ( liftA2 )
-import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^), dot, norm)
+import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^))
                                           , tag, catEvents, accumHold, constant, isEvent
-                                          , accumHoldBy, edgeTag, repeatedly, gate
-                                          , edge, iPre, merge, integral, hold
-                                          , drSwitch, edgeJust, parB, pSwitchB, event )
+                                          , accumHoldBy, edgeTag, repeatedly, gate, tagWith
+                                          , edge, iPre, merge, integral, hold, dpSwitch, iPre
+                                          , drSwitch, edgeJust, parB, pSwitchB, event, delay )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate, Color)
                                           , Color
@@ -16,11 +16,15 @@ import Graphics.Gloss                     ( Display (InWindow)
                                           , text
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
-import Linear.V2 (V2 (V2))
+import Linear.V2 (V2 (V2), perp)
+import Linear.Metric (dot, norm)
+import Linear.Vector ((^/))
 import GJK.Collision (collision)
 import GJK.Mink (Mink)
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Monoid (Sum)
+import Data.List (elemIndices)
+import Data.Bool (bool)
 import GHC.Float (double2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
@@ -30,6 +34,7 @@ import Linear.VectorSpace ()
 
 type Pos = V2 Double
 type Vel = V2 Double
+type Size = V2 Double
 
 type BounceV = Vel -> Vel
 type BounceE = Event BounceV
@@ -84,6 +89,10 @@ lVelocity v = arr (\d -> (d' d) * v)
 eventToMaybe :: Event a -> Maybe a
 eventToMaybe = event Nothing Just
 
+filterByList (True:bs)  (x:xs) = x : filterByList bs xs
+filterByList (False:bs) (_:xs) =     filterByList bs xs
+filterByList _          _      = []
+
 collision' :: (Mink a, Mink b) -> Bool
 collision' = (fromMaybe False) . uncurry (collision 10)
 
@@ -136,9 +145,9 @@ brickBounces = proc (b, bs) -> do
     collision'' b (bp, _) = foldl (.) id $ bounces <$> (collisions $ segment <$> edges)
       where
         edges = zip bp (drop 1 $ cycle bp)
-        segment = uncurry minkSegment
+        segment = uncurry minkSegment . (\es -> trace (show es) es)
         collisions = filter (\a -> collision' (a, b))
-        bounces ((a, b), _) = bounce $ a - b
+        bounces ((a, b), _) = let v = (a-b) in bounce $ perp $ v ^/ norm v
 
 ballReset :: SF (BallMink, ScreenSize) (Event ())
 ballReset = proc (((r, (V2 x y)), _) , (V2 w h)) -> edge -< y < -(fromIntegral h)/2
@@ -156,14 +165,11 @@ paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-100)) >>> (collisionRectang
 --   c' <- hold Nothing -< Event $ event (Just bm) (const Nothing) c
 --   returnA -< c'
 
-brick :: Pos -> SF (Event ()) (Maybe BrickMink)
-brick p = proc e -> do
-  bm <- collisionRectangle $ V2 50 20 -< p
+brick :: Size -> Pos -> SF (Event ()) (Maybe BrickMink)
+brick s p = proc e -> do
+  bm <- collisionRectangle s -< p
   c <- hold Just -< e `tag` (const Nothing)
   returnA -< c bm
-
-bricks :: [SF BallMink (Maybe BrickMink)] -> SF BallMink [BrickMink]
-bricks bs = parB bs >>^ catMaybes
 
 -- arrList :: SF a b -> SF [a] [b]
 -- arrList sf = 
@@ -174,12 +180,13 @@ bricks bs = parB bs >>^ catMaybes
 -- flat' :: [SF a b] -> SF [a] [b]
 -- flat' sfs = undefined
 
-bricks'' :: [SF (Event ()) (Maybe BrickMink)] -> SF [Event BrickMink] [BrickMink]
-bricks'' bs0 = undefined
-  -- proc bcs -> do
-  -- rec
-  --   bs <- hold bs0 -< filterByList
-  -- (event True (const False)) <$> bcs
+bricks :: [SF (Event ()) (Maybe BrickMink)] -> SF [Event a] [BrickMink]
+bricks bs0 = bricks' bs0 >>^ catMaybes
+  where
+    bricks' bs = dpSwitch route bs (arr $ deadE . snd) c
+    route es = zip $ (fmap (tagWith ()) es) ++ repeat NoEvent
+    deadE = (\bs -> bool (Event bs) NoEvent (and bs)) . (fmap (not . null))
+    c sfs ds = bricks' $ filterByList ds sfs
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) G.Down _ _)   = gi { keyLeft = G.Down }
@@ -197,17 +204,20 @@ paddleD G.Down G.Up = VelForward
 paddleD G.Up G.Down = VelBackward
 paddleD _ _ = VelZero
 
+brick1 = brick $ V2 50 20
+bricks1 = bricks [brick1 (V2 100 120)]
+
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
     r               <- ballReset       -< (b, screenSize gi)
-    bcs             <- brickCollisions -< (b, bs)
+    bcs             <- brickCollisions >>> iPre [] -< (b, bs)
     wb              <- wallBounce      -< (b, screenSize gi)
     pb              <- paddleBounce    -< (b, p)
     bb              <- brickBounces    -< (b, bcs)
     p@(ps, _)       <- paddle          -< paddleD (keyRight gi) (keyLeft gi)
-    b@((br, bp), _) <- drSwitch ball   -< (mergeC [wb, pb], r `tag` ball)
-    bs              <- bricks [constant NoEvent >>> brick (V2 120 120)] -< b
+    b@((br, bp), _) <- drSwitch ball   -< (mergeC [wb, pb, bb], r `tag` ball)
+    bs              <- bricks1         -< bcs
   returnA -< Pictures $ [ drawBall bp br
                         , drawRectangle ps
                         ] ++ (drawRectangle <$> fst <$> bs)
