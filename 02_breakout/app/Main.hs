@@ -190,6 +190,17 @@ bricks bs0 = bricks' bs0 >>^ catMaybes
     -- cont _ ds | (trace (show ds) False) = undefined
     cont sfs ds = bricks' $ filterByList ds sfs
 
+bricks1 = bricks [brickN (if y<3 then 1 else 2) (V2 50 20) (V2 (x*60) (y*30+5)) | x <- [-2..2], y <- [1..3]]
+
+brickN :: Int -> Size -> Pos -> SF (Event ()) (Maybe BrickMink)
+brickN n s p = (countDown n) >>> (brick s p)
+
+countDown :: Int -> SF (Event ()) (Event ())
+countDown n = proc e -> do
+  i <- accumHold n -< e `tag` ((+) (-1))
+  e <- edge -< i <= 0
+  returnA -< e
+
 parseGameInput :: GameInput -> InputEvent -> GameInput
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) G.Down _ _)   = gi { keyLeft = G.Down }
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) G.Up _ _)     = gi { keyLeft = G.Up }
@@ -206,20 +217,18 @@ paddleD G.Down G.Up = VelForward
 paddleD G.Up G.Down = VelBackward
 paddleD _ _ = VelZero
 
-brick1 = brick $ V2 50 20
-bricks1 = bricks [brick1 (V2 100 120)]
-
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
     r               <- ballReset       -< (b, screenSize gi)
-    bcs             <- brickCollisions >>> iPre [] -< (b, bs)
+    bcs             <- brickCollisions -< (b, bs)
+    dbcs            <- iPre []         -< bcs
     wb              <- wallBounce      -< (b, screenSize gi)
     pb              <- paddleBounce    -< (b, p)
     bb              <- brickBounces    -< (b, bcs)
     p@(ps, _)       <- paddle          -< paddleD (keyRight gi) (keyLeft gi)
     b@((br, bp), _) <- drSwitch ball   -< (mergeC [wb, pb, bb], r `tag` ball)
-    bs              <- bricks1         -< bcs
+    bs              <- bricks1         -< dbcs
   returnA -< Pictures $ [ drawBall bp br
                         , drawRectangle ps
                         ] ++ (drawRectangle <$> fst <$> bs)
