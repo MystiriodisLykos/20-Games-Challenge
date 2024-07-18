@@ -9,7 +9,7 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSp
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate)
                                           , circleSolid, polygon
-                                          , white
+                                          , white, black, color
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Linear.V2 (V2 (V2), perp)
@@ -30,14 +30,9 @@ type Pos = V2 Double
 type Vel = V2 Double
 type Size = V2 Double
 
-type BounceV = Vel -> Vel
-type BounceE = Event BounceV
-
 type CircleMink = Mink (Double, Pos)
-type BallMink = CircleMink
 type RectangleMink = Mink [V2 Double]
 type PaddleMink = RectangleMink
-type BrickMink = RectangleMink
 
 type ScreenSize = V2 Int
 
@@ -49,29 +44,11 @@ data GameInput = GameInput {
   screenSize :: V2 Int
 } deriving Show
 
--- Doesn't always work as expected when the surface
--- vector is parallel or orthogonal to the vector
--- in that case bounce twice
--- TODO: can I change this function to do 2 bounces?
-bounce :: V2 Double -> BounceV
-bounce s a = (norm a / norm b) *^ b
-  where
-    b = a - (2 * (dot a s) *^ s)
-
 mergeC :: [Event (a -> a)] -> Event (a -> a)
 mergeC = (fmap $ foldl1 (.)) . catEvents
 
-vertical :: BounceV
-vertical = bounce $ V2 0 1
-
-horizontal :: BounceV
-horizontal = bounce $ V2 1 0
-
 position :: Pos -> SF Vel Pos
 position p0 = integral >>^ ((+) p0)
-
-bVelocity :: Vel -> SF BounceE Vel
-bVelocity v0 = accumHold v0
 
 lVelocity :: Vel -> SF VelDirection Vel
 lVelocity v = arr (\d -> (d' d) * v)
@@ -88,9 +65,6 @@ filterByList _          _      = []
 collision' :: (Mink a, Mink b) -> Bool
 collision' = (fromMaybe False) . uncurry (collision 10)
 
-collisionCircle :: Double -> SF Pos BallMink
-collisionCircle r = arr $ minkCircle r
-
 -- flip size and position arguments
 minkRectangle' :: V2 Double -> V2 Double -> Mink [V2 Double]
 minkRectangle' s p = minkRectangle p s
@@ -98,76 +72,11 @@ minkRectangle' s p = minkRectangle p s
 collisionRectangle :: V2 Double -> SF Pos (Mink [V2 Double])
 collisionRectangle s = arr $ minkRectangle' s
 
-drawBall :: V2 Double -> Double -> Picture
-drawBall (V2 x y) = Translate (double2Float x) (double2Float y) . circleSolid . double2Float
-
 drawRectangle :: [V2 Double] -> Picture
-drawRectangle = polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
-
-wallBounce :: SF (CircleMink, ScreenSize) BounceE
-wallBounce = proc (((r, (V2 x y)), _) , (V2 w h)) -> do
-  t <- edgeTag vertical -< y + r >= (int h)/2
-  wl <- edgeTag horizontal -< x + r >= (int w)/2
-  wr <- edgeTag horizontal -< (-x) + r >= (int w)/2
-  returnA -< mergeC [t, wl, wr]
-  where
-    int = fromIntegral
-
-paddleBounce :: SF (BallMink, PaddleMink) BounceE
-paddleBounce = collision' ^>> edgeTag vertical
-
-brickCollisions :: SF (BallMink, [BrickMink]) [Event BrickMink]
-brickCollisions = proc (b, bs) -> do
-  returnA -< (\k -> (Event k) `gate` collision' (b, k) ) <$> bs
-
-brickBounces :: SF (BallMink, [Event BrickMink]) BounceE
-brickBounces = proc (b, bs) -> do
-  returnA -< mergeC $ (fmap $ collision'' b) <$> bs
-  where
-    -- TODO: break this out
-    collision'' :: BallMink -> BrickMink -> BounceV
-    collision'' b (bp, _) = foldl (.) id $ bounces <$> (collisions $ segment <$> edges)
-      where
-        edges = zip bp (drop 1 $ cycle bp)
-        segment = uncurry minkSegment -- . (\es -> trace (show es) es)
-        collisions = filter (\a -> collision' (a, b))
-        bounces ((v1, v2), _) = let e = (v1-v2) in bounce $ perp $ e ^/ norm e
-
-ballReset :: SF (BallMink, ScreenSize) (Event ())
-ballReset = proc (((_, (V2 _ y)), _) , (V2 _ h)) -> edge -< y < -(fromIntegral h)/2
-
-acc :: SF Vel Vel
-acc = proc v -> do
-  a <- integral -< 0.05
-  returnA -< (1 + a) * v
-
-ball :: SF BounceE BallMink
-ball = (bVelocity $ V2 50 (-100)) >>> acc >>> (position $ V2 0 (-50)) >>> (collisionCircle 8)
+drawRectangle = color white . polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
 
 paddle :: SF VelDirection PaddleMink
 paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-200)) >>> (collisionRectangle $ V2 50 5)
-
-brick :: Size -> Pos -> SF (Event ()) (Maybe BrickMink)
-brick s p = proc e -> do
-  bm <- collisionRectangle s -< p
-  c <- hold Just -< e `tag` (const Nothing)
-  returnA -< c bm
-
-bricks :: [SF (Event ()) (Maybe BrickMink)] -> SF [Event a] [BrickMink]
-bricks bs0 = bricks' bs0 >>^ catMaybes
-  where
-    bricks' bs = pSwitch route bs kill cont
-    route es = zip $ (fmap (tagWith ()) es) ++ repeat NoEvent
-    kill = (coll . (fmap (not . null)) . snd) ^>> dropEvents 1
-    coll bs = bool (Event bs) NoEvent (and bs)
-    -- cont _ ds | (trace (show ds) False) = undefined
-    cont sfs ds = bricks' $ filterByList ds sfs
-
-bricks1 :: SF [Event a] [BrickMink]
-bricks1 = bricks [brickN (if y<3 then 1 else 2) (V2 50 20) (V2 (x*60) (y*30+5)) | x <- [-2..2], y <- [1..3]]
-
-brickN :: Int -> Size -> Pos -> SF (Event ()) (Maybe BrickMink)
-brickN n s p = (countDown n) >>> (brick s p)
 
 countDown :: Int -> SF (Event ()) (Event ())
 countDown n = proc e -> do
@@ -194,21 +103,11 @@ paddleD _ _ = VelZero
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
-    r               <- ballReset        -< (b, screenSize gi)
-    bcs             <- brickCollisions  -< (b, bs)
-    dbcs            <- iPre []          -< bcs
-    wb              <- wallBounce       -< (b, screenSize gi)
-    pb              <- paddleBounce     -< (b, p)
-    bb              <- brickBounces     -< (b, bcs)
     p@(ps, _)       <- paddle           -< paddleD (keyRight gi) (keyLeft gi)
-    b@((br, bp), _) <- drSwitch ball    -< (mergeC [wb, pb, bb], r `tag` ball)
-    bs              <- drSwitch bricks1 -< (dbcs, r `tag` bricks1)
-  returnA -< Pictures $ [ drawBall bp br
-                        , drawRectangle ps
-                        ] ++ (drawRectangle <$> fst <$> bs)
+  returnA -< Pictures $ [ drawRectangle ps ]
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
-defaultPlay = playYampa (InWindow "Space Invaders" (300, 500) (200, 200)) white 60
+defaultPlay = playYampa (InWindow "Space Invaders" (300, 500) (200, 200)) black 60
 
 main :: IO ()
 main = defaultPlay $ input >>> game'
