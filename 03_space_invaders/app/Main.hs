@@ -1,11 +1,11 @@
 {-# LANGUAGE Arrows #-}
 
-import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), arr )
+import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (***), (&&&), arr, first )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^))
-                                          , tag, catEvents, accumHold
-                                          , accumHoldBy, edgeTag, gate, tagWith
-                                          , edge, iPre, integral, hold, pSwitch, iPre
-                                          , drSwitch, dropEvents )
+                                          , tag, catEvents, accumHold, mergeBy, after, repeatedly
+                                          , accumHoldBy, edgeTag, gate, tagWith, attach
+                                          , edge, iPre, integral, hold, pSwitch, iPre, notYet
+                                          , drSwitch, dropEvents, par, constant, kSwitch )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate)
                                           , circleSolid, polygon
@@ -33,6 +33,7 @@ type Size = V2 Double
 type CircleMink = Mink (Double, Pos)
 type RectangleMink = Mink [V2 Double]
 type PaddleMink = RectangleMink
+type RocketMink = RectangleMink
 
 type ScreenSize = V2 Int
 
@@ -58,6 +59,7 @@ lVelocity v = arr (\d -> (d' d) * v)
     d' _ = 0
 
 filterByList :: [Bool] -> [a] -> [a]
+-- filterByList (b:bs) _ | (trace (show b) False) = undefined
 filterByList (True:bs)  (x:xs) = x : filterByList bs xs
 filterByList (False:bs) (_:xs) =     filterByList bs xs
 filterByList _          _      = []
@@ -77,6 +79,55 @@ drawRectangle = color white . polygon . fmap (\(V2 x y) -> (double2Float x, doub
 
 paddle :: SF VelDirection PaddleMink
 paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-200)) >>> (collisionRectangle $ V2 50 5)
+
+type Rocket a = SF (Event a) (Maybe RocketMink)
+
+untilA :: SF a b -> SF (a, Event ()) (Maybe b)
+untilA sf = (fmap (tagWith (constant Nothing))) ^>> drSwitch (sf >>^ Just)
+
+untilA' :: SF () b -> SF (Event ()) (Maybe b)
+untilA' sf = ((,) ()) ^>> untilA sf
+
+pCat :: a -> [SF a b] -> SF [a] [b]
+pCat a sfs = par (\es -> zip (es ++ repeat a)) sfs
+
+pSwitchCatMaybes :: a -> [SF a (Maybe b)] -> SF [a] [b]
+pSwitchCatMaybes a sfs = par' sfs >>^ catMaybes
+  where
+    par' sfs' = pSwitch route sfs' kill cont
+    route es = zip (es ++ repeat a)
+    kill = arr (coll . (fmap (not . null)) . snd)
+    coll bs = bool (Event bs) NoEvent (and bs)
+    -- cont _ _ | (trace ("pSwitchCatMaybes cont") False) = undefined
+    -- cont _ ks | (trace (show ks) False) = undefined
+    cont sfs' keeps = par' $ filterByList keeps sfs'
+
+pSwitchCatEvents :: [SF (Event a) (Maybe b)] -> SF [Event a] [b]
+pSwitchCatEvents = pSwitchCatMaybes NoEvent
+
+-- TODO switch to just a or b when the other stops producing results
+pSwitchCat :: SF [a] [b] -> SF [a] [b] -> SF [a] [b]
+pSwitchCat f s = split f s >>^ uncurry (++)
+  where
+    split f' s' = proc as -> do
+      bs1 <- f -< as
+      bs2 <- s -< drop (length bs1) as
+      returnA -< (bs1, bs2)
+
+pSwitchCatApp :: SF [a] [b] -> SF ([a], Event (SF [a] [b])) [b]
+pSwitchCatApp sf = kSwitch (first sf >>^ fst) (event' >>> notYet) cont
+  where
+    event' :: SF (([a], Event (SF [a] [b])), [b]) (Event (SF [a] [b]))
+    event' = arr $ snd . fst
+    cont :: SF ([a], Event (SF [a] [b])) [b] -> (SF [a] [b]) -> SF ([a], Event (SF [a] [b])) [b]
+    -- cont _ _ | (trace "cont" False) = undefined
+    cont running new = pSwitchCatApp $ pSwitchCat ((\as -> (as, NoEvent)) ^>> running) new
+
+rockets :: [Rocket a] -> SF ([Event a], Event [Rocket a]) [RocketMink]
+rockets rs = (\(es, spawn) -> (es, pSwitchCatEvents <$> spawn)) ^>> pSwitchCatApp (pSwitchCatEvents rs)
+
+rocket' :: Pos -> Rocket ()
+rocket' p = untilA' $ constant (V2 0 10) >>> position p >>> collisionRectangle (V2 20 20)
 
 countDown :: Int -> SF (Event ()) (Event ())
 countDown n = proc e -> do
@@ -103,8 +154,11 @@ paddleD _ _ = VelZero
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
-    p@(ps, _)       <- paddle           -< paddleD (keyRight gi) (keyLeft gi)
-  returnA -< Pictures $ [ drawRectangle ps ]
+    p@(ps, _)       <- paddle                        -< paddleD (keyRight gi) (keyLeft gi)
+    k               <- repeatedly 2.5 ()                   -< ()
+    s               <- repeatedly 5 [rocket' (V2 0 0), rocket' (V2 50 50)]  -< ()
+    rs              <- rockets [rocket' (V2 50 50), rocket' (V2 0 0)]       -< ([k] ++ repeat NoEvent, s)
+  returnA -< Pictures $ [ drawRectangle ps ] ++ (drawRectangle <$> fst <$> rs)
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "Space Invaders" (300, 500) (200, 200)) black 60
