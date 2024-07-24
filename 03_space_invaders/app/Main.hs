@@ -1,6 +1,6 @@
 {-# LANGUAGE Arrows #-}
 
-import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (***), (&&&), arr, first )
+import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (***), (&&&), arr, first, second )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^))
                                           , tag, catEvents, accumHold, mergeBy, after, repeatedly
                                           , accumHoldBy, edgeTag, gate, tagWith, attach
@@ -44,6 +44,12 @@ data GameInput = GameInput {
   keyRight :: G.KeyState,
   screenSize :: V2 Int
 } deriving Show
+
+rkSwitch :: SF a b -> SF (a, Event (SF a b -> SF a b)) b
+rkSwitch i = kSwitch (first i >>^ fst) event' cont
+  where
+    event' = arr (snd . fst) >>> notYet
+    cont sf f = rkSwitch $ f $ (\a -> (a, NoEvent)) ^>> sf
 
 mergeC :: [Event (a -> a)] -> Event (a -> a)
 mergeC = (fmap $ foldl1 (.)) . catEvents
@@ -114,20 +120,13 @@ pSwitchCat f s = split f s >>^ uncurry (++)
       bs2 <- s -< drop (length bs1) as
       returnA -< (bs1, bs2)
 
-pSwitchCatApp :: SF [a] [b] -> SF ([a], Event (SF [a] [b])) [b]
-pSwitchCatApp sf = kSwitch (first sf >>^ fst) (event' >>> notYet) cont
-  where
-    event' :: SF (([a], Event (SF [a] [b])), [b]) (Event (SF [a] [b]))
-    event' = arr $ snd . fst
-    cont :: SF ([a], Event (SF [a] [b])) [b] -> (SF [a] [b]) -> SF ([a], Event (SF [a] [b])) [b]
-    -- cont _ _ | (trace "cont" False) = undefined
-    cont running new = pSwitchCatApp $ pSwitchCat ((\as -> (as, NoEvent)) ^>> running) new
-
 rockets :: [Rocket a] -> SF ([Event a], Event [Rocket a]) [RocketMink]
-rockets rs = (\(es, spawn) -> (es, pSwitchCatEvents <$> spawn)) ^>> pSwitchCatApp (pSwitchCatEvents rs)
+rockets rs = second spawn >>> rkSwitch (pSwitchCatEvents rs)
+  where
+    spawn = arr (fmap $ (flip pSwitchCat) . pSwitchCatEvents)
 
 rocket' :: Pos -> Rocket ()
-rocket' p = untilA' $ constant (V2 0 10) >>> position p >>> collisionRectangle (V2 20 20)
+rocket' p = untilA' $ constant (V2 0 20) >>> position p >>> collisionRectangle (V2 20 20)
 
 countDown :: Int -> SF (Event ()) (Event ())
 countDown n = proc e -> do
