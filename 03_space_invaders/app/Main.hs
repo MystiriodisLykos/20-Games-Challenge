@@ -46,13 +46,14 @@ data VelDirection = VelForward | VelZero | VelBackward deriving (Show, Eq)
 data GameInput = GameInput {
   keyLeft :: G.KeyState,
   keyRight :: G.KeyState,
+  keyFire :: G.KeyState,
   screenSize :: V2 Int
 } deriving Show
 
 arrUntil :: SF a b -> SF (a, Event c) (Maybe b)
 arrUntil sf = dSwitch (first $ sf >>^ Just) (const $ constant Nothing)
 
-arrUntilEvent :: SF () b -> SF (Event ()) (Maybe b)
+arrUntilEvent :: SF () b -> SF (Event a) (Maybe b)
 arrUntilEvent sf = ((,) ()) ^>> arrUntil sf
 
 drpKillSwitchZ :: a -> [KSF a b] -> SF ([a], Event ([KSF a b] -> [KSF a b])) [b]
@@ -109,6 +110,14 @@ paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-200)) >>> (collisionRectang
 rocket :: Pos -> Rocket ()
 rocket p = arrUntilEvent $ constant (V2 0 20) >>> position p >>> collisionRectangle (V2 20 20)
 
+type Gun a b = SF (Pos, Event a) (Event [Rocket b])
+
+basicGun :: Gun () ()
+basicGun = arr (\(p, e) -> e `tag` [rocket p])
+
+doubleGun :: Gun () ()
+doubleGun = arr (\(p, e) -> e `tag` [rocket p, rocket (p + (V2 30 0))])
+
 rockets :: [Rocket a] -> SF ([Event a], Event [Rocket a]) [RocketMink]
 rockets = pKillSpawnZ NoEvent
 
@@ -119,15 +128,14 @@ countDown n = proc e -> do
   returnA -< e'
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
-parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) G.Down _ _)   = gi { keyLeft = G.Down }
-parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) G.Up _ _)     = gi { keyLeft = G.Up }
-parseGameInput gi (G.EventKey (G.SpecialKey G.KeyRight) G.Down _ _) = gi { keyRight = G.Down }
-parseGameInput gi (G.EventKey (G.SpecialKey G.KeyRight) G.Up _ _)   = gi { keyRight = G.Up }
+parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) s _ _)   = gi { keyLeft = s }
+parseGameInput gi (G.EventKey (G.SpecialKey G.KeyRight) s _ _) = gi { keyRight = s }
+parseGameInput gi (G.EventKey (G.SpecialKey G.KeySpace) s _ _) = gi { keyFire = s }
 parseGameInput gi (G.EventResize (x, y)) = gi {screenSize = V2 x y}
 parseGameInput gi _ = gi
 
 input :: SF (Event InputEvent) GameInput
-input = accumHoldBy parseGameInput $ GameInput G.Up G.Up (V2 100 100)
+input = accumHoldBy parseGameInput $ GameInput G.Up G.Up G.Up (V2 100 100)
 
 paddleD :: G.KeyState -> G.KeyState -> VelDirection
 paddleD G.Down G.Up = VelForward
@@ -137,10 +145,12 @@ paddleD _ _ = VelZero
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
-    p@(ps, _)       <- paddle                        -< paddleD (keyRight gi) (keyLeft gi)
-    k               <- repeatedly 2.5 ()                   -< ()
-    s               <- repeatedly 5 [rocket (V2 0 0), rocket (V2 50 50)]  -< ()
-    rs              <- rockets [rocket (V2 50 50), rocket (V2 0 0)]       -< ([k], s)
+    p@(ps, _)       <- paddle            -< paddleD (keyRight gi) (keyLeft gi)
+    k               <- repeatedly 2.5 () -< ()
+    f               <- edge              -< keyFire gi == G.Down
+    s               <- doubleGun          -< (ps !! 0, f)
+    -- s               <- repeatedly 5 [rocket (V2 0 0), rocket (V2 50 50)]  -< ()
+    rs              <- rockets []        -< ([k], s)
   returnA -< Pictures $ [ drawRectangle ps ] ++ (drawRectangle <$> fst <$> rs)
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
