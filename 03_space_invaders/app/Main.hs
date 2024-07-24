@@ -6,6 +6,7 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSp
                                           , accumHoldBy, edgeTag, gate, tagWith, attach, dSwitch
                                           , edge, iPre, integral, hold, pSwitch, iPre, notYet
                                           , drSwitch, dropEvents, par, constant, kSwitch )
+import FRP.Yampa.Switches                 ( drpSwitchZ)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate)
                                           , circleSolid, polygon
@@ -37,6 +38,7 @@ type RocketMink = RectangleMink
 
 type ScreenSize = V2 Int
 
+type KSF a b = SF a (Maybe b)
 type Rocket a = SF (Event a) (Maybe RocketMink)
 
 data VelDirection = VelForward | VelZero | VelBackward deriving (Show, Eq)
@@ -47,40 +49,27 @@ data GameInput = GameInput {
   screenSize :: V2 Int
 } deriving Show
 
-rkSwitch :: SF a b -> SF (a, Event (SF a b -> SF a b)) b
-rkSwitch i = kSwitch (first i >>^ fst) event' cont
-  where
-    event' = arr (snd . fst) >>> notYet
-    cont sf f = rkSwitch $ f $ (\a -> (a, NoEvent)) ^>> sf
-
 arrUntil :: SF a b -> SF (a, Event c) (Maybe b)
 arrUntil sf = dSwitch (first $ sf >>^ Just) (const $ constant Nothing)
 
 arrUntilEvent :: SF () b -> SF (Event ()) (Maybe b)
 arrUntilEvent sf = ((,) ()) ^>> arrUntil sf
 
-pSwitchUntil :: a -> [SF a (Maybe b)] -> SF [a] [b]
-pSwitchUntil a sfs = par' sfs >>^ catMaybes
+drpKillSwitchZ :: a -> [KSF a b] -> SF ([a], Event ([KSF a b] -> [KSF a b])) [b]
+drpKillSwitchZ a sfs = proc (as, e) -> do
+  rec
+    bs <- drpSwitchZ sfs -< (as ++ repeat a, mergeC [kill, e])
+    kill <- kill' -< bs
+  returnA -< catMaybes bs
   where
-    par' sfs' = pSwitch route sfs' kill cont
-    route es = zip (es ++ repeat a)
-    kill = arr (coll . (fmap (not . null)) . snd)
-    coll bs = bool (Event bs) NoEvent (and bs)
-    -- cont _ _ | (trace ("pSwitchUntil cont") False) = undefined
-    -- cont _ ks | (trace (show ks) False) = undefined
-    cont sfs' keeps = par' $ filterByList keeps sfs'
+    kill' = arr (coll . (fmap (not . null)))
+    coll bs = bool (Event $ filterByList $ bs ++ repeat True) NoEvent (and bs)
 
-pESwitchUntil :: [SF (Event a) (Maybe b)] -> SF [Event a] [b]
-pESwitchUntil = pSwitchUntil NoEvent
+spawn :: SF (Event ([KSF a b])) (Event ([KSF a b] -> [KSF a b]))
+spawn = arr $ fmap $ flip (++)
 
--- TODO switch to just a or b when the other stops producing results
-pSwitchCat :: SF [a] [b] -> SF [a] [b] -> SF [a] [b]
-pSwitchCat f s = split f s >>^ uncurry (++)
-  where
-    split f' s' = proc as -> do
-      bs1 <- f -< as
-      bs2 <- s -< drop (length bs1) as
-      returnA -< (bs1, bs2)
+pKillSpawnZ :: a -> [KSF a b] -> SF ([a], Event ([KSF a b])) [b]
+pKillSpawnZ a sfs = second spawn >>> drpKillSwitchZ a sfs
 
 mergeC :: [Event (a -> a)] -> Event (a -> a)
 mergeC = (fmap $ foldl1 (.)) . catEvents
@@ -121,9 +110,7 @@ rocket :: Pos -> Rocket ()
 rocket p = arrUntilEvent $ constant (V2 0 20) >>> position p >>> collisionRectangle (V2 20 20)
 
 rockets :: [Rocket a] -> SF ([Event a], Event [Rocket a]) [RocketMink]
-rockets rs = second spawn >>> rkSwitch (pESwitchUntil rs)
-  where
-    spawn = arr (fmap $ (flip pSwitchCat) . pESwitchUntil)
+rockets = pKillSpawnZ NoEvent
 
 countDown :: Int -> SF (Event ()) (Event ())
 countDown n = proc e -> do
@@ -153,7 +140,7 @@ game' = proc gi -> do
     p@(ps, _)       <- paddle                        -< paddleD (keyRight gi) (keyLeft gi)
     k               <- repeatedly 2.5 ()                   -< ()
     s               <- repeatedly 5 [rocket (V2 0 0), rocket (V2 50 50)]  -< ()
-    rs              <- rockets [rocket (V2 50 50), rocket (V2 0 0)]       -< ([k] ++ repeat NoEvent, s)
+    rs              <- rockets [rocket (V2 50 50), rocket (V2 0 0)]       -< ([k], s)
   returnA -< Pictures $ [ drawRectangle ps ] ++ (drawRectangle <$> fst <$> rs)
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
