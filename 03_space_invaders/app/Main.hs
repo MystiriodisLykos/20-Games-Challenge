@@ -15,7 +15,7 @@ import Graphics.Gloss                     ( Display (InWindow)
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Linear.V2 (V2 (V2), perp)
 import Linear.Metric (dot, norm)
-import Linear.Vector ((^/))
+import Linear.Vector ((^/), lerp)
 import GJK.Collision (collision)
 import GJK.Mink (Mink)
 import Data.Maybe (fromMaybe, catMaybes)
@@ -94,6 +94,11 @@ filterByList _          _      = []
 collision' :: (Mink a, Mink b) -> Bool
 collision' = (fromMaybe False) . uncurry (collision 10)
 
+avgV2 :: (Fractional a) => [V2 a] -> V2 a
+avgV2 [] = V2 (fromRational 0) (fromRational 0)
+avgV2 [x] = x
+avgV2 (x:xs) = lerp 0.5 x $ avgV2 xs
+
 -- flip size and position arguments
 minkRectangle' :: V2 Double -> V2 Double -> Mink [V2 Double]
 minkRectangle' s p = minkRectangle p s
@@ -108,15 +113,30 @@ paddle :: SF VelDirection PaddleMink
 paddle = lVelocity (V2 100 0) >>> (position $ V2 0 (-200)) >>> (collisionRectangle $ V2 50 5)
 
 rocket :: Pos -> Rocket ()
-rocket p = arrUntilEvent $ constant (V2 0 20) >>> position p >>> collisionRectangle (V2 20 20)
+rocket p = arrUntilEvent $ constant (V2 0 50) >>> position p >>> collisionRectangle (V2 20 20)
 
-type Gun a b = SF (Pos, Event a) (Event [Rocket b])
+rocket' :: Pos -> Rocket ()
+rocket' p = fmap Left ^>> vBoundRocket 300 (rocket p)
 
-basicGun :: Gun () ()
-basicGun = arr (\(p, e) -> e `tag` [rocket p])
+vBoundRocket :: Double -> Rocket a -> Rocket (Either a Double)
+vBoundRocket iTop r = proc e -> do
+  r' <- r -< e >>= (either Event (const NoEvent))
+  top <- hold iTop -< e >>= (either (const NoEvent) Event)
+  returnA -< r' >>= cap top
+  where
+    cap :: Double -> RocketMink -> Maybe RocketMink
+    cap top' rm@(rps, _) | (or $ over top' <$> rps) = Nothing
+    cap _    rm = Just rm
+    over :: Double -> Pos -> Bool
+    over ym (V2 _ y) = y > ym
 
-doubleGun :: Gun () ()
-doubleGun = arr (\(p, e) -> e `tag` [rocket p, rocket (p + (V2 30 0))])
+type Gun a b = SF (Pos, a) (Event [Rocket b])
+
+basicGun :: Gun (Event ()) ()
+basicGun = arr (\(p, e) -> e `tag` [rocket' p])
+
+doubleGun :: Gun (Event ()) ()
+doubleGun = arr (\(p, e) -> e `tag` [rocket' p, rocket' (p + (V2 30 0))])
 
 rockets :: [Rocket a] -> SF ([Event a], Event [Rocket a]) [RocketMink]
 rockets = pKillSpawnZ NoEvent
@@ -148,9 +168,9 @@ game' = proc gi -> do
     p@(ps, _)       <- paddle            -< paddleD (keyRight gi) (keyLeft gi)
     k               <- repeatedly 2.5 () -< ()
     f               <- edge              -< keyFire gi == G.Down
-    s               <- doubleGun          -< (ps !! 0, f)
+    s               <- basicGun          -< (avgV2 ps, f)
     -- s               <- repeatedly 5 [rocket (V2 0 0), rocket (V2 50 50)]  -< ()
-    rs              <- rockets []        -< ([k], s)
+    rs              <- rockets []        -< ([NoEvent], s)
   returnA -< Pictures $ [ drawRectangle ps ] ++ (drawRectangle <$> fst <$> rs)
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
