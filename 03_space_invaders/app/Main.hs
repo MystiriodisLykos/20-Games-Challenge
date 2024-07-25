@@ -4,8 +4,8 @@ import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (***),
 import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^))
                                           , tag, catEvents, accumHold, mergeBy, after, repeatedly
                                           , accumHoldBy, edgeTag, gate, tagWith, attach, dSwitch
-                                          , edge, iPre, integral, hold, pSwitch, iPre, notYet
-                                          , drSwitch, dropEvents, par, constant, kSwitch )
+                                          , edge, iPre, integral, hold, pSwitch, iPre, notYet, switch
+                                          , drSwitch, dropEvents, par, constant, kSwitch, iEdge )
 import FRP.Yampa.Switches                 ( drpSwitchZ)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures, Translate)
@@ -132,11 +132,16 @@ vBoundRocket iTop r = proc e -> do
 
 type Gun a b = SF (Pos, a) (Event [Rocket b])
 
-basicGun :: Gun (Event ()) ()
-basicGun = arr (\(p, e) -> e `tag` [rocket' p])
+basicGun :: Gun Bool ()
+basicGun = onlyEveryT 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p])
 
 doubleGun :: Gun (Event ()) ()
 doubleGun = arr (\(p, e) -> e `tag` [rocket' p, rocket' (p + (V2 30 0))])
+
+onlyEveryT :: Double -> SF a (Event b) -> SF a (Event b)
+onlyEveryT t sf = dSwitch (sf >>^ (\e -> (e, e `tag` ()))) cont
+  where
+    cont _ = switch (after t () >>^ (\e -> (NoEvent, e))) (const $ onlyEveryT t sf)
 
 rockets :: [Rocket a] -> SF ([Event a], Event [Rocket a]) [RocketMink]
 rockets = pKillSpawnZ NoEvent
@@ -167,8 +172,7 @@ game' = proc gi -> do
   rec
     p@(ps, _)       <- paddle            -< paddleD (keyRight gi) (keyLeft gi)
     k               <- repeatedly 2.5 () -< ()
-    f               <- edge              -< keyFire gi == G.Down
-    s               <- basicGun          -< (avgV2 ps, f)
+    s               <- basicGun          -< (avgV2 ps, keyFire gi == G.Down)
     -- s               <- repeatedly 5 [rocket (V2 0 0), rocket (V2 50 50)]  -< ()
     rs              <- rockets []        -< ([NoEvent], s)
   returnA -< Pictures $ [ drawRectangle ps ] ++ (drawRectangle <$> fst <$> rs)
