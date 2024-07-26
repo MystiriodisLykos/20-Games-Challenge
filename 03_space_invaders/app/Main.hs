@@ -4,9 +4,9 @@ import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (&&&),
 import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , tag, catEvents, accumHold, after
                                           , accumHoldBy, dSwitch, constant
-                                          , edge, integral, hold, switch
+                                          , edge, integral, hold, switch, rSwitch
                                           , iEdge )
-import FRP.Yampa.Switches                 ( drpSwitchZ)
+import FRP.Yampa.Switches                 ( drpSwitchZ, parB )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures)
                                           , polygon
@@ -33,6 +33,7 @@ type Size = V2 Double
 type RectangleMink = Mink [V2 Double]
 type PaddleMink = RectangleMink
 type RocketMink = RectangleMink
+type AlienMink = RectangleMink
 
 type ScreenSize = V2 Int
 
@@ -49,6 +50,7 @@ type KSF a b = SF a (Maybe b)
 type Rocket a = SF (Event a) (Maybe RocketMink)
 type Gun a b = SF (Pos, a) (Event [Rocket b])
 type Ship = SF VelDirection PaddleMink
+type Alien a = SF (Event a) (Either AlienMink (Event Int))
 
 filterByList :: [Bool] -> [a] -> [a]
 -- filterByList (b:bs) _ | (trace (show b) False) = undefined
@@ -76,6 +78,9 @@ arrUntil sf = dSwitch (first $ sf >>^ Just) (const $ constant Nothing)
 
 arrUntilEvent :: SF () b -> SF (Event a) (Maybe b)
 arrUntilEvent sf = ((,) ()) ^>> arrUntil sf
+
+switchAfter :: Double -> SF a b -> SF a b -> SF a b
+switchAfter n a b = switch (a &&& after n b) id
 
 onlyEveryT :: Double -> SF a (Event b) -> SF a (Event b)
 onlyEveryT t sf = dSwitch (sf >>^ (\e -> (e, e `tag` ()))) cont
@@ -108,6 +113,15 @@ lVelocity v = arr (\d -> (d' d) * v)
     d' VelBackward = -1
     d' _ = 0
 
+aVelocity :: SF a Vel
+aVelocity = lVel
+  where
+    switch' :: Double -> Vel -> SF a Vel -> SF a Vel
+    switch' d v b = switchAfter d (constant v) b
+    lVel   = switch' 10  (V2 (-50) 0) (dVel rVel)
+    rVel   = switch' 10  (V2   50  0) (dVel lVel)
+    dVel n = switch' 0.25 (V2 0 (-50)) n
+
 collisionRectangle :: V2 Double -> SF Pos (Mink [V2 Double])
 collisionRectangle s = arr $ minkRectangle' s
 
@@ -134,6 +148,10 @@ vBoundRocket iTop r = proc e -> do
 
 basicGun :: Gun Bool ()
 basicGun = onlyEveryT 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p])
+
+basicAlien p = aVelocity >>> position p >>> collisionRectangle (V2 30 30)
+
+aliens = parB [basicAlien (V2 x y) | x <- [50,100..450], y <- [100,150..250]]
 
 rockets :: SF ([Event a], Event [Rocket a]) [RocketMink]
 rockets = pKillSpawnZ NoEvent []
@@ -162,16 +180,17 @@ shipD _ _ = VelZero
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
-    p@(ps, _)       <- ship      -< shipD (keyRight gi) (keyLeft gi)
-    spawnRs         <- basicGun -< (avg ps, keyFire gi == G.Down)
-    rs              <- rockets   -< ([NoEvent], spawnRs)
-  returnA -< Pictures $ [ drawRectangle ps ] ++ (drawRectangle <$> fst <$> rs)
+    p@(ps, _)       <- ship       -< shipD (keyRight gi) (keyLeft gi)
+    spawnRs         <- basicGun   -< (avg ps, keyFire gi == G.Down)
+    as              <- aliens     -< ()
+    rs              <- rockets    -< ([NoEvent], spawnRs)
+  returnA -< Pictures $ drawRectangle <$> fst <$> (rs ++ as ++ [p])
 
 drawRectangle :: [V2 Double] -> Picture
 drawRectangle = color white . polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
-defaultPlay = playYampa (InWindow "Space Invaders" (300, 500) (200, 200)) black 60
+defaultPlay = playYampa (InWindow "Space Invaders" (1000, 600) (200, 200)) black 60
 
 main :: IO ()
 main = defaultPlay $ input >>> game'
