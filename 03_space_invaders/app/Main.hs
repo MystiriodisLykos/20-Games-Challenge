@@ -1,21 +1,20 @@
 {-# LANGUAGE Arrows #-}
 
-import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (***), (&&&), arr, first, second )
-import FRP.Yampa                          ( SF, Event (Event, NoEvent), VectorSpace((*^))
-                                          , tag, catEvents, accumHold, mergeBy, after, repeatedly
-                                          , accumHoldBy, edgeTag, gate, tagWith, attach, dSwitch
-                                          , edge, iPre, integral, hold, pSwitch, iPre, notYet, switch
-                                          , drSwitch, dropEvents, par, constant, kSwitch, iEdge )
+import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (&&&), arr, first, second )
+import FRP.Yampa                          ( SF, Event (Event, NoEvent)
+                                          , tag, catEvents, accumHold, after
+                                          , accumHoldBy, dSwitch, constant
+                                          , edge, integral, hold, switch
+                                          , iEdge )
 import FRP.Yampa.Switches                 ( drpSwitchZ)
 import Graphics.Gloss                     ( Display (InWindow)
-                                          , Picture (Pictures, Translate)
-                                          , circleSolid, polygon
+                                          , Picture (Pictures)
+                                          , polygon
                                           , white, black, color
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
-import Linear.V2 (V2 (V2), perp)
-import Linear.Metric (dot, norm)
-import Linear.Vector ((^/), lerp)
+import Linear.V2 (V2 (V2))
+import Linear.Vector (lerp)
 import GJK.Collision (collision)
 import GJK.Mink (Mink)
 import Data.Maybe (fromMaybe, catMaybes)
@@ -24,14 +23,13 @@ import GHC.Float (double2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
-import Linear.GJK (minkCircle, minkRectangle, minkSegment)
+import Linear.GJK (minkRectangle)
 import Linear.VectorSpace ()
 
 type Pos = V2 Double
 type Vel = V2 Double
 type Size = V2 Double
 
-type CircleMink = Mink (Double, Pos)
 type RectangleMink = Mink [V2 Double]
 type PaddleMink = RectangleMink
 type RocketMink = RectangleMink
@@ -125,8 +123,8 @@ vBoundRocket iTop r = proc e -> do
   returnA -< r' >>= cap top
   where
     cap :: Double -> RocketMink -> Maybe RocketMink
-    cap top' rm@(rps, _) | (or $ over top' <$> rps) = Nothing
-    cap _    rm = Just rm
+    cap top' (rps, _) | (or $ over top' <$> rps) = Nothing
+    cap _    rm                                  = Just rm
     over :: Double -> Pos -> Bool
     over ym (V2 _ y) = y > ym
 
@@ -171,10 +169,8 @@ game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
     p@(ps, _)       <- paddle            -< paddleD (keyRight gi) (keyLeft gi)
-    k               <- repeatedly 2.5 () -< ()
-    s               <- basicGun          -< (avgV2 ps, keyFire gi == G.Down)
-    -- s               <- repeatedly 5 [rocket (V2 0 0), rocket (V2 50 50)]  -< ()
-    rs              <- rockets []        -< ([NoEvent], s)
+    spawnRs         <- doubleGun          -< (avgV2 ps, keyFire gi == G.Down)
+    rs              <- rockets []        -< ([NoEvent], spawnRs)
   returnA -< Pictures $ [ drawRectangle ps ] ++ (drawRectangle <$> fst <$> rs)
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
