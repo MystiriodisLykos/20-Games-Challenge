@@ -3,13 +3,13 @@
 import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (&&&), arr, first, second )
 import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , tag, catEvents, accumHold, after
-                                          , accumHoldBy, dSwitch, constant
+                                          , accumHoldBy, dSwitch, constant, iPre
                                           , edge, integral, hold, switch, rSwitch
                                           , iEdge )
 import FRP.Yampa.Switches                 ( drpSwitchZ, parB )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures)
-                                          , polygon
+                                          , polygon, scale
                                           , white, black, color
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
@@ -19,7 +19,7 @@ import GJK.Collision (collision)
 import GJK.Mink (Mink)
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Bool (bool)
-import GHC.Float (double2Float)
+import GHC.Float (double2Float, int2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
@@ -162,6 +162,12 @@ countDown n = proc e -> do
   e' <- edge -< i <= 0
   returnA -< e'
 
+scaleA :: SF GameInput (Picture -> Picture)
+scaleA = arr $ (\(V2 x y) -> scale x y) . scale' . size'
+  where
+    size' = (fmap int2Float) . screenSize
+    scale' sizeC = sizeC / size' giI
+
 parseGameInput :: GameInput -> InputEvent -> GameInput
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) s _ _)   = gi { keyLeft = s }
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyRight) s _ _) = gi { keyRight = s }
@@ -169,8 +175,10 @@ parseGameInput gi (G.EventKey (G.SpecialKey G.KeySpace) s _ _) = gi { keyFire = 
 parseGameInput gi (G.EventResize (x, y)) = gi {screenSize = V2 x y}
 parseGameInput gi _ = gi
 
+giI = GameInput G.Up G.Up G.Up (V2 1000 600)
+
 input :: SF (Event InputEvent) GameInput
-input = accumHoldBy parseGameInput $ GameInput G.Up G.Up G.Up (V2 100 100)
+input = accumHoldBy parseGameInput $ giI
 
 shipD :: G.KeyState -> G.KeyState -> VelDirection
 shipD G.Down G.Up = VelForward
@@ -184,7 +192,8 @@ game' = proc gi -> do
     spawnRs         <- basicGun   -< (avg ps, keyFire gi == G.Down)
     as              <- aliens     -< ()
     rs              <- rockets    -< ([NoEvent], spawnRs)
-  returnA -< Pictures $ drawRectangle <$> fst <$> (rs ++ as ++ [p])
+    scaleP          <- scaleA     -< gi
+  returnA -< scaleP $ Pictures $ drawRectangle <$> fst <$> (rs ++ as ++ [p])
 
 drawRectangle :: [V2 Double] -> Picture
 drawRectangle = color white . polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
