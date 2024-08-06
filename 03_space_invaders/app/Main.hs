@@ -15,7 +15,6 @@ import Graphics.Gloss                     ( Display (InWindow)
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Linear.V2 (V2 (V2))
 import Linear.Vector (Additive, lerp, zero)
-import GJK.Collision (collision)
 import GJK.Mink (Mink)
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Either (isLeft)
@@ -25,7 +24,7 @@ import GHC.Float (double2Float, int2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
-import Linear.GJK         (minkRectangle)
+import Linear.GJK         ( collision', minkRectangle' )
 import Linear.VectorSpace ()
 import Data.DMap          (toMap, elems, fromList, DMap (DMap), IMap)
 import FRP.Yampa.Game     ( WithKillFlag (..)
@@ -66,13 +65,6 @@ type Rocket a = SF (Event a) (Maybe RocketMink)
 type Gun a b = SF (Pos, a) (Event [Rocket b])
 type Ship = SF VelDirection PaddleMink
 type Alien a = SF (Event a) (AlienOut)
-
-collision' :: (Mink a, Mink b) -> Bool
-collision' = (fromMaybe False) . uncurry (collision 10)
-
--- flip size and position arguments
-minkRectangle' :: V2 Double -> V2 Double -> Mink [V2 Double]
-minkRectangle' s p = minkRectangle p s
 
 avg :: (Fractional a, Additive f) => [f a] -> f a
 avg []     = zero
