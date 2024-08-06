@@ -7,7 +7,6 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent)
                                           , accumHoldBy, dSwitch, constant, iPre, event
                                           , edge, integral, hold, switch, rSwitch
                                           , iEdge, repeatedly, switch, dropEvents )
-import FRP.Yampa.AltSwitches              ( drpSwitchA, safePair )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures)
                                           , polygon, scale
@@ -19,7 +18,6 @@ import Linear.Vector (Additive, lerp, zero)
 import GJK.Collision (collision)
 import GJK.Mink (Mink)
 import Data.Maybe (fromMaybe, catMaybes)
-import Data.Bool (bool)
 import Data.Either (isLeft)
 import qualified Data.Set as Set
 import qualified Data.Map.Strict as Map
@@ -27,17 +25,16 @@ import GHC.Float (double2Float, int2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
-import Linear.GJK (minkRectangle)
+import Linear.GJK         (minkRectangle)
 import Linear.VectorSpace ()
-import Data.DMap (toMap, elems, fromList, DMap (DMap), IMap)
+import Data.DMap          (toMap, elems, fromList, DMap (DMap), IMap)
+import FRP.Yampa.Game     ( WithKillFlag (..)
+                          , switchAfter, onlyEvery
+                          , pKillSpawn
+                          , switchWhenE
+                          )
 
 import Witherable as W
-
-class WithKillFlag a where
-  killF :: a -> Bool
-
-instance (Foldable f) => WithKillFlag (f a) where
-  killF = null
 
 newtype AlienOut = AlienOut {unAlienOut :: Either AlienMink (Event Int)}
 
@@ -70,12 +67,6 @@ type Gun a b = SF (Pos, a) (Event [Rocket b])
 type Ship = SF VelDirection PaddleMink
 type Alien a = SF (Event a) (AlienOut)
 
-filterBy :: (Alternative col, W.Filterable col) => col Bool -> col a -> col a
-filterBy bs as = W.mapMaybe map' $ safePair True bs as
-  where
-    map' (True, a) = Just a
-    map' _          = Nothing
-
 collision' :: (Mink a, Mink b) -> Bool
 collision' = (fromMaybe False) . uncurry (collision 10)
 
@@ -87,46 +78,6 @@ avg :: (Fractional a, Additive f) => [f a] -> f a
 avg []     = zero
 avg [x]    = x
 avg (x:xs) = lerp 0.5 x $ avg xs
-
-mergeC :: [Event (a -> a)] -> Event (a -> a)
-mergeC = (fmap $ foldl1 (.)) . catEvents
-
-arrUntil :: SF a b -> SF (a, Event c) (Maybe b)
-arrUntil sf = switch (first $ sf >>^ Just) (const $ constant Nothing)
-
-arrUntilEvent :: SF () b -> SF (Event a) (Maybe b)
-arrUntilEvent sf = ((,) ()) ^>> arrUntil sf
-
-switchAfter :: Double -> SF a b -> SF a b -> SF a b
-switchAfter n a b = switch (a &&& after n b) id
-
-onlyEveryT :: Double -> SF a (Event b) -> SF a (Event b)
-onlyEveryT t sf = dSwitch (sf >>^ (\e -> (e, e `tag` ()))) cont
-  where
-    cont _ = switch (after t () >>^ (\e -> (NoEvent, e))) (const $ onlyEveryT t sf)
-
-drpKillSwitchZ :: (WithKillFlag b, Alternative col, W.Filterable col, Foldable col)
-  => a
-  -> col (SF a b)
-  -> SF (col a, Event (col (SF a b) -> col (SF a b))) (col b)
-drpKillSwitchZ a sfs = proc (as, e) -> do
-  rec
-    bs <- drpSwitchA a sfs -< (as, mergeC [killE bs, e])
-  returnA -< bs
-  where
-    killE bs = event' $ (not . killF) <$> bs
-    -- event' bs | (trace (show $ and bs) False) = undefined
-    event' bs = bool (Event $ filterBy bs) NoEvent (and bs)
-
-spawnC :: (WithKillFlag b, Alternative col, W.Filterable col, Foldable col)
-  => SF (Event (col (SF a b))) (Event (col (SF a b) -> col (SF a b)))
-spawnC = arr $ fmap $ flip (<|>)
-
-pKillSpawnZ :: (WithKillFlag b, Alternative col, W.Filterable col, Foldable col)
-  => a
-  -> col (SF a b)
-  -> SF (col a, Event (col (SF a b))) (col b)
-pKillSpawnZ a sfs = second spawnC >>> drpKillSwitchZ a sfs
 
 position :: Pos -> SF Vel Pos
 position p0 = integral >>^ ((+) p0)
@@ -154,7 +105,7 @@ ship :: Ship
 ship = lVelocity (V2 100 0) >>> (position $ V2 0 (-200)) >>> (collisionRectangle $ V2 50 5)
 
 rocket :: Pos -> Rocket ()
-rocket p = arrUntilEvent $ constant (V2 0 50) >>> position p >>> collisionRectangle (V2 20 20)
+rocket p = switchWhenE $ constant (V2 0 50) >>> position p >>> collisionRectangle (V2 20 20)
 
 rocket' :: Pos -> Rocket ()
 rocket' p = fmap Left ^>> vBoundRocket 300 (rocket p)
@@ -172,7 +123,7 @@ vBoundRocket iTop r = proc e -> do
     over ym (V2 _ y) = y > ym
 
 basicGun :: Gun Bool ()
-basicGun = onlyEveryT 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p])
+basicGun = onlyEvery 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p])
 
 basicAlien p s = ((,) ()) ^>> switch
   (first $ aVelocity >>> position p >>> collisionRectangle (V2 30 30) >>^ (AlienOut . Left))
@@ -182,12 +133,12 @@ aliens1 = fromList [basicAlien (V2 x y) 10 | x <- [50,100..450], y <- [100,150..
 
 aliens :: SF (IMap (Event a), Event [Alien a]) (IMap AlienMink, Event Int)
 aliens = second index
-  >>> pKillSpawnZ NoEvent aliens1
+  >>> pKillSpawn NoEvent aliens1
   >>^ Map.mapEither id . (fmap unAlienOut) . toMap
   >>> (arr $ DMap Nothing) *** (arr $ fmap sum . catEvents . Map.elems)
 
 rockets :: SF (IMap (Event a), Event [Rocket a]) (IMap RocketMink)
-rockets = second index >>> pKillSpawnZ NoEvent empty >>^ W.catMaybes
+rockets = second index >>> pKillSpawn NoEvent empty >>^ W.catMaybes
 
 index :: SF (Event [a]) (Event (IMap a))
 index = proc as -> do
