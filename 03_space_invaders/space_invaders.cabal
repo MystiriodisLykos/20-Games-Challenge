@@ -76,7 +76,8 @@ executable space-invaders
         Yampa ^>=0.14,
         gloss ^>=1.13,
         linear ^>=1.22,
-        gjk ^>=0.0.0.2
+        gjk ^>=0.0.0.2,
+        witherable ^>=0.4
 
     -- Directories containing source files.
     hs-source-dirs:   app
