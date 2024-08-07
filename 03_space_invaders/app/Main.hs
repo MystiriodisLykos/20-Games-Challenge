@@ -79,6 +79,14 @@ avg []     = zero
 avg [x]    = x
 avg (x:xs) = lerp 0.5 x $ avg xs
 
+rightEvent :: Either a b -> Event b
+rightEvent (Right b) = Event b
+rightEvent _         = NoEvent
+
+leftEvent :: Either a b -> Event a
+leftEvent (Left a) = Event a
+leftEvent _        = NoEvent
+
 position :: Pos -> SF Vel Pos
 position p0 = integral >>^ ((+) p0)
 
@@ -112,8 +120,8 @@ rocket' p = fmap Left ^>> vBoundRocket 300 (rocket p)
 
 vBoundRocket :: Double -> Rocket a -> Rocket (Either a Double)
 vBoundRocket iTop r = proc e -> do
-  r' <- r -< e >>= (either Event (const NoEvent))
-  top <- hold iTop -< e >>= (either (const NoEvent) Event)
+  r' <- r -< e >>= leftEvent
+  top <- hold iTop -< e >>= rightEvent
   returnA -< r' >>= cap top
   where
     cap :: Double -> RocketMink -> Maybe RocketMink
