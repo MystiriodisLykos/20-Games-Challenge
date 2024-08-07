@@ -26,7 +26,7 @@ import Debug.Trace (trace)
 
 import Linear.GJK         ( collision', minkRectangle' )
 import Linear.VectorSpace ()
-import Data.DMap          (toMap, elems, fromList, DMap (DMap), IMap)
+import Data.DMap          (toMap, elems, fromList, partition, DMap (DMap), IMap)
 import FRP.Yampa.Game     ( WithKillFlag (..)
                           , switchAfter, onlyEvery
                           , pKillSpawn
@@ -37,9 +37,17 @@ import Witherable as W
 
 newtype AlienOut = AlienOut {unAlienOut :: Either AlienMink (Event Int)}
 
+data AlienOut' = AlienOut' { aCollision :: AlienMink
+                           , aDead :: Bool
+                           , aScore :: Int
+                           }
+
 instance WithKillFlag AlienOut where
   killF (AlienOut (Left _))  = False
   killF (AlienOut (Right _)) = True
+
+instance WithKillFlag AlienOut' where
+  killF = aDead
 
 type Pos = V2 Double
 type Vel = V2 Double
@@ -117,17 +125,39 @@ vBoundRocket iTop r = proc e -> do
 basicGun :: Gun Bool ()
 basicGun = onlyEvery 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p])
 
+basicAlien :: Pos -> Int -> Alien a
 basicAlien p s = ((,) ()) ^>> switch
   (first $ aVelocity >>> position p >>> collisionRectangle (V2 30 30) >>^ (AlienOut . Left))
   (const $ constant $ AlienOut $ Right $ Event s)
 
+arrTag :: SF (a, Event b) (a, Event a)
+arrTag = proc (a, e) -> do returnA -< (a, e `tag` a)
+
+basicAlien' :: Pos -> Int -> SF (Event a) AlienOut'
+basicAlien' i s = switch
+  ((aVelocity >>>
+    position i >>>
+    collisionRectangle (V2 30 30) >>^
+    (\m -> AlienOut' m False s))
+   &&& (arr id) >>> arrTag )
+  (\l -> constant l{aDead=True})
+
 aliens1 = fromList [basicAlien (V2 x y) 10 | x <- [50,100..450], y <- [100,150..250]]
+
+aliens1' = fromList [basicAlien' (V2 x y) 10 | x <- [50,100..450], y <- [100,150..250]]
 
 aliens :: SF (IMap (Event a), Event [Alien a]) (IMap AlienMink, Event Int)
 aliens = second index
   >>> pKillSpawn NoEvent aliens1
   >>^ Map.mapEither id . (fmap unAlienOut) . toMap
   >>> (arr $ DMap Nothing) *** (arr $ fmap sum . catEvents . Map.elems)
+
+aliens' :: SF
+  (IMap (Event a), Event [SF (Event a) AlienOut'])
+  (IMap AlienOut', IMap AlienOut')
+aliens' = second index >>>
+          pKillSpawn NoEvent aliens1' >>^
+          partition (not . aDead)
 
 rockets :: SF (IMap (Event a), Event [Rocket a]) (IMap RocketMink)
 rockets = second index >>> pKillSpawn NoEvent empty >>^ W.catMaybes
@@ -182,13 +212,13 @@ game' = proc gi -> do
     p@(ps, _)       <- ship             -< shipD (keyRight gi) (keyLeft gi)
     spawnRs         <- basicGun         -< (avg ps, keyFire gi == G.Down)
     ae              <- collisionTest () -< as
-    (as, kills)     <- aliens           -< (ae, NoEvent)
+    (as, kills)     <- aliens'           -< (ae, NoEvent)
     re              <- collisionTest () -< rs
     rs              <- rockets          -< (re, spawnRs)
     scaleP          <- scaleA           -< gi
   returnA -< scaleP $ Pictures $ drawRectangle <$> fst <$> (
     elems rs ++
-    elems as ++
+    elems (aCollision <$> as) ++
     [p]
     )
 

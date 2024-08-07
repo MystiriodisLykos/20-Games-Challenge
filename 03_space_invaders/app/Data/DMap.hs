@@ -1,10 +1,13 @@
 module Data.DMap ( elems, fromList
                  , DMap (..)
                  , IMap (..)
+                 , liftMap, liftMapF, liftMapBi
+                 , partition
                  ) where
 
 import qualified Data.Map.Strict as Map
 import Control.Applicative                ( Alternative, empty, (<|>) )
+import Data.Bifunctor (Bifunctor, bimap)
 
 import Witherable as W
 
@@ -20,6 +23,25 @@ elems = Map.elems . toMap
 
 fromList :: [v] -> IMap v
 fromList as = DMap Nothing $ Map.fromAscList $ zip [0..] as
+
+liftMap :: (Map.Map k v -> Map.Map k v) -> DMap k v -> DMap k v
+liftMap f (DMap d m) = DMap d $ f m
+
+liftMapF :: (Functor f)
+  => (Map.Map k v -> f (Map.Map k v))
+  -> DMap k v
+  -> f (DMap k v)
+liftMapF f (DMap d m) = (DMap d) <$> (f m)
+
+liftMapBi :: (Bifunctor f)
+  => (Map.Map k v -> f (Map.Map k v) (Map.Map k v))
+  -> DMap k v
+  -> f (DMap k v) (DMap k v)
+liftMapBi f (DMap d m) = bimap c c $ f m
+  where c = DMap d
+
+-- partition :: (v -> Bool) -> DMap k v -> (DMap k v, DMap k v)
+partition p = liftMapBi $ Map.partition p
 
 instance Functor (DMap k) where
   fmap f (DMap d m) = DMap (f <$> d) (fmap f m)
