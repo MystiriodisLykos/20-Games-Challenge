@@ -49,7 +49,7 @@ instance Functor (DMap k) where
 instance (Ord k) => Applicative (DMap k) where
   pure x = DMap (Just x) Map.empty
 
-  (<*>) :: DMap k (a -> b) -> DMap k a -> DMap k b
+  -- (<*>) :: DMap k (a -> b) -> DMap k a -> DMap k b
   DMap df fs <*> DMap dx xs = DMap (df <*> dx) $ Map.unions
     [ Map.intersectionWith ($) fs xs, fFallback, xFallback ]
     where

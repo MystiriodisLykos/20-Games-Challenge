@@ -1,4 +1,4 @@
-{-# LANGUAGE Arrows #-}
+{-# LANGUAGE Arrows, FlexibleInstances #-}
 
 module FRP.Yampa.Game ( WithKillFlag (..)
                       , pKillSpawn, spawnC

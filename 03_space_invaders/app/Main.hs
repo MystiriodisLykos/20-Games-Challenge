@@ -1,4 +1,4 @@
-{-# LANGUAGE Arrows #-}
+{-# LANGUAGE Arrows, KindSignatures, MultiParamTypeClasses, ConstraintKinds, FlexibleInstances, FlexibleContexts #-}
 
 import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (&&&), (***), arr, first, second )
 import Control.Applicative                ( Alternative, empty, (<|>) )
