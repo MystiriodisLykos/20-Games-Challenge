@@ -55,14 +55,14 @@ type AlienType a = ( WithKillFlag a
                     , WithScore a
                     , Drawable a) :: Constraint
 
-data BasicAlienType = RedAlien {aDead'' :: Bool, aPos :: Pos}
-                | BlueAlien {aDead'' :: Bool, aPos :: Pos}
-                | GreenAlien {aDead'' :: Bool, aPos :: Pos}
-                | YellowAlien {aDead'' :: Bool, aPos :: Pos}
+data BasicAlienType = RedAlien {aDead :: Bool, aPos :: Pos}
+                | BlueAlien {aDead :: Bool, aPos :: Pos}
+                | GreenAlien {aDead :: Bool, aPos :: Pos}
+                | YellowAlien {aDead :: Bool, aPos :: Pos}
                 deriving (Show, Eq)
 
 instance WithKillFlag (BasicAlienType) where
-  killF = aDead''
+  killF = aDead
 
 instance WithCollision BasicAlienType [V2 Double] where
   collision a = minkRectangle' (V2 30 30) (aPos a)
@@ -183,7 +183,7 @@ redAlien :: Pos -> BasicAlien a
 redAlien i = switch (tagOnE $
                           alienMovement i >>^
                           RedAlien False)
-                  (\l -> constant l{aDead''=True})
+                  (\l -> constant l{aDead=True})
 
 blueAlien :: Pos -> BasicAlien a
 blueAlien i = redAlien i >>^ (\(RedAlien a b) -> BlueAlien a b)
