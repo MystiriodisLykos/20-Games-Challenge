@@ -10,7 +10,10 @@ import FRP.Yampa                          ( SF, Event (Event, NoEvent)
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures)
                                           , polygon, scale
-                                          , white, black, color
+                                          , white, black
+                                          , green, blue
+                                          , red, yellow
+                                          , color, text
                                           )
 import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Linear.V2 (V2 (V2))
@@ -18,6 +21,7 @@ import Linear.Vector (Additive, lerp, zero)
 import GJK.Mink (Mink)
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Either (isLeft)
+import Data.Kind (Constraint)
 import qualified Data.Set as Set
 import qualified Data.Map.Strict as Map
 import GHC.Float (double2Float, int2Float)
@@ -32,22 +36,51 @@ import FRP.Yampa.Game     ( WithKillFlag (..)
                           , pKillSpawn
                           , switchWhenE
                           )
+import FRP.Yampa.AltSwitches ( parA )
 
 import Witherable as W
 
-newtype AlienOut = AlienOut {unAlienOut :: Either AlienMink (Event Int)}
+class WithCollision a b where
+  collision :: a -> Mink b
 
-data AlienOut' = AlienOut' { aCollision :: AlienMink
-                           , aDead :: Bool
-                           , aScore :: Int
-                           }
+class WithScore a where
+  score :: a -> Int
 
-instance WithKillFlag AlienOut where
-  killF (AlienOut (Left _))  = False
-  killF (AlienOut (Right _)) = True
+class Drawable a where
+  draw :: a -> Picture
 
-instance WithKillFlag AlienOut' where
-  killF = aDead
+type AlienType a = ( WithKillFlag a
+                    , WithCollision a [V2 Double]
+                    , WithScore a
+                    , Drawable a) :: Constraint
+
+data BasicAlienType = RedAlien {aDead'' :: Bool, aPos :: Pos}
+                | BlueAlien {aDead'' :: Bool, aPos :: Pos}
+                | GreenAlien {aDead'' :: Bool, aPos :: Pos}
+                | YellowAlien {aDead'' :: Bool, aPos :: Pos}
+                deriving (Show, Eq)
+
+instance WithKillFlag (BasicAlienType) where
+  killF = aDead''
+
+instance WithCollision BasicAlienType [V2 Double] where
+  collision a = minkRectangle' (V2 30 30) (aPos a)
+
+instance WithScore BasicAlienType where
+  score (RedAlien _ _) = 1
+  score (BlueAlien _ _) = 2
+  score (GreenAlien _ _) = 3
+  score (YellowAlien _ _) = 4
+
+instance Drawable BasicAlienType where
+  draw a = draw' a $ color' a
+    where
+      draw' a' c = drawRectangle c $ fst $ minkRectangle' (V2 30 30) (aPos a')
+      -- color' a | (trace (show a) False) = undefined
+      color' (RedAlien _ _) = red
+      color' (BlueAlien _ _) = blue
+      color' (GreenAlien _ _) = green
+      color' (YellowAlien _ _) = yellow
 
 type Pos = V2 Double
 type Vel = V2 Double
@@ -72,7 +105,8 @@ data GameInput = GameInput {
 type Rocket a = SF (Event a) (Maybe RocketMink)
 type Gun a b = SF (Pos, a) (Event [Rocket b])
 type Ship = SF VelDirection PaddleMink
-type Alien a = SF (Event a) (AlienOut)
+type Alien t a = SF (Event a) (t)
+type BasicAlien a = Alien BasicAlienType a
 
 avg :: (Fractional a, Additive f) => [f a] -> f a
 avg []     = zero
@@ -133,39 +167,48 @@ vBoundRocket iTop r = proc e -> do
 basicGun :: Gun Bool ()
 basicGun = onlyEvery 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p])
 
-basicAlien :: Pos -> Int -> Alien a
-basicAlien p s = ((,) ()) ^>> switch
-  (first $ aVelocity >>> position p >>> collisionRectangle (V2 30 30) >>^ (AlienOut . Left))
-  (const $ constant $ AlienOut $ Right $ Event s)
+tagOn :: SF a b -> SF (a, Event c) (b, Event b)
+tagOn sf = proc (a, e) -> do
+  b <- sf -< a
+  returnA -< (b, e `tag` b)
 
-arrTag :: SF (a, Event b) (a, Event a)
-arrTag = proc (a, e) -> do returnA -< (a, e `tag` a)
+tagOnE :: SF () b -> SF (Event c) (b, Event b)
+tagOnE sf = ((,) ()) ^>> tagOn sf
 
-basicAlien' :: Pos -> Int -> SF (Event a) AlienOut'
-basicAlien' i s = switch
-  ((aVelocity >>>
-    position i >>>
-    collisionRectangle (V2 30 30) >>^
-    (\m -> AlienOut' m False s))
-   &&& (arr id) >>> arrTag )
-  (\l -> constant l{aDead=True})
+alienMovement :: Pos -> SF a Pos
+alienMovement i = aVelocity >>> position i
 
-aliens1 = fromList [basicAlien (V2 x y) 10 | x <- [50,100..450], y <- [100,150..250]]
+redAlien :: Pos -> BasicAlien a
+redAlien i = switch (tagOnE $
+                          alienMovement i >>^
+                          RedAlien False)
+                  (\l -> constant l{aDead''=True})
 
-aliens1' = fromList [basicAlien' (V2 x y) 10 | x <- [50,100..450], y <- [100,150..250]]
+blueAlien :: Pos -> BasicAlien a
+blueAlien i = redAlien i >>^ (\(RedAlien a b) -> BlueAlien a b)
 
-aliens :: SF (IMap (Event a), Event [Alien a]) (IMap AlienMink, Event Int)
-aliens = second index
-  >>> pKillSpawn NoEvent aliens1
-  >>^ Map.mapEither id . (fmap unAlienOut) . toMap
-  >>> (arr $ DMap Nothing) *** (arr $ fmap sum . catEvents . Map.elems)
+greenAlien :: Pos -> BasicAlien a
+greenAlien i = redAlien i >>^ (\(RedAlien a b) -> GreenAlien a b)
 
-aliens' :: SF
-  (IMap (Event a), Event [SF (Event a) AlienOut'])
-  (IMap AlienOut', IMap AlienOut')
-aliens' = second index >>>
-          pKillSpawn NoEvent aliens1' >>^
-          partition (not . aDead)
+yellowAlien :: Pos -> BasicAlien a
+yellowAlien i = redAlien i >>^ (\(RedAlien a b) -> YellowAlien a b)
+
+alienTypes = [redAlien, greenAlien, blueAlien, yellowAlien]
+
+aliens1 = [c (V2 x y) | x      <- take 9 [50,100..]
+                      , (c, y) <- take 4 $ zip alienTypes [100,150..]]
+
+-- aliens :: AlienType a =>
+--   [SF (Event c) a] ->
+--   SF (IMap (Event c), Event [SF (Event c) a]) (IMap a, IMap a)
+-- aliens i = second index >>>
+--            pKillSpawn NoEvent (fromList i) >>^
+--            partition (not . killF)
+
+aliens :: AlienType a
+  => [Alien a b]
+  -> SF (IMap (Event b)) (IMap a, IMap a)
+aliens sfs = parA NoEvent (fromList sfs) >>^ partition (not . killF)
 
 rockets :: SF (IMap (Event a), Event [Rocket a]) (IMap RocketMink)
 rockets = second index >>> pKillSpawn NoEvent empty >>^ W.catMaybes
@@ -220,18 +263,19 @@ game' = proc gi -> do
     p@(ps, _)       <- ship             -< shipD (keyRight gi) (keyLeft gi)
     spawnRs         <- basicGun         -< (avg ps, keyFire gi == G.Down)
     ae              <- collisionTest () -< as
-    (as, kills)     <- aliens'           -< (ae, NoEvent)
-    re              <- collisionTest () -< rs
-    rs              <- rockets          -< (re, spawnRs)
+    (as, kills)     <- aliens aliens1   -< (ae)
+    -- re              <- collisionTest () -< rs
+    -- rs              <- rockets          -< (re, spawnRs)
     scaleP          <- scaleA           -< gi
-  returnA -< scaleP $ Pictures $ drawRectangle <$> fst <$> (
-    elems rs ++
-    elems (aCollision <$> as) ++
+  returnA -< scaleP $ Pictures $ (drawRectangle white <$> fst <$> (
+    -- elems rs ++
     [p]
-    )
+    )) ++
+    (draw <$> elems as) ++
+    [color white $ text $ show $ sum $ score <$> elems kills]
 
-drawRectangle :: [V2 Double] -> Picture
-drawRectangle = color white . polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
+drawRectangle :: G.Color -> [V2 Double] -> Picture
+drawRectangle c = color c . polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
 
 defaultPlay :: SF (Event InputEvent) Picture -> IO ()
 defaultPlay = playYampa (InWindow "Space Invaders" (1000, 600) (200, 200)) black 60

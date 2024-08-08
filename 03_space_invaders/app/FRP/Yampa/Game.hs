@@ -11,6 +11,7 @@ import Control.Arrow       ( (>>>), (^>>), (>>^), (&&&)
                            )
 import Control.Applicative ( Alternative, (<|>) )
 import Data.Bool           (bool)
+import Debug.Trace (trace)
 
 import FRP.Yampa          ( SF, Event (Event, NoEvent), Time
                           , constant
