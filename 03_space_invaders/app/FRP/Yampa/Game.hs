@@ -4,7 +4,8 @@ module FRP.Yampa.Game ( WithKillFlag (..)
                       , pKillSpawn, spawnC
                       , switchWhen, switchWhenE
                       , switchAfter, onlyEvery
-                      , ) where
+                      , partAliveDead, partAliveDeadE
+                      ) where
 
 import Control.Arrow       ( (>>>), (^>>), (>>^), (&&&)
                            , arr, first, second, returnA
@@ -14,7 +15,7 @@ import Data.Bool           (bool)
 import Debug.Trace (trace)
 
 import FRP.Yampa          ( SF, Event (Event, NoEvent), Time
-                          , constant
+                          , constant, notYet, edgeBy
                           )
 import FRP.Yampa.Event    ( catEvents, tag )
 import FRP.Yampa.EventS   ( after )
@@ -58,7 +59,8 @@ drpKillSwitch :: (WithKillFlag b, Alternative col, W.Filterable col, Foldable co
   -> SF (col a, Event (col (SF a b) -> col (SF a b))) (col b)
 drpKillSwitch a sfs = proc (as, e) -> do
   rec
-    bs <- drpSwitchA a sfs -< (as, mergeC [killE bs, e])
+    bs <- drpSwitchA a sfs -< (as, mergeC [kill, e])
+    kill <- killE ^>> notYet -< bs
   returnA -< bs
   where
     killE bs = event' $ (not . killF) <$> bs
@@ -74,3 +76,19 @@ pKillSpawn :: (WithKillFlag b, Alternative col, W.Filterable col, Foldable col)
   -> col (SF a b)
   -> SF (col a, Event (col (SF a b))) (col b)
 pKillSpawn a sfs = second spawnC >>> drpKillSwitch a sfs
+
+partAliveDead :: (WithKillFlag b, W.Filterable col)
+  => SF (col b) (col b, col b)
+partAliveDead = arr (\f -> (aliveF f, deadF f))
+  where
+    aliveF = W.filter (not . killF)
+    deadF = W.filter killF
+
+edgeLength :: (Foldable f) => SF (f a) (Event (f a))
+edgeLength = proc f -> do
+  e <- edgeBy (\l n -> bool Nothing (Just n) (n > l)) 0 -< length f
+  returnA -< e `tag` f
+
+partAliveDeadE :: (WithKillFlag b, Foldable col, W.Filterable col)
+  => SF (col b) (col b, Event (col b))
+partAliveDeadE = partAliveDead >>> (second $ edgeLength)

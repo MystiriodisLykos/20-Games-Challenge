@@ -35,8 +35,9 @@ import FRP.Yampa.Game     ( WithKillFlag (..)
                           , switchAfter, onlyEvery
                           , pKillSpawn
                           , switchWhenE
+                          , partAliveDeadE
                           )
-import FRP.Yampa.AltSwitches ( parA )
+-- import FRP.Yampa.AltSwitches ( parA )
 
 import Witherable as W
 
@@ -198,17 +199,12 @@ alienTypes = [redAlien, greenAlien, blueAlien, yellowAlien]
 aliens1 = [c (V2 x y) | x      <- take 9 [50,100..]
                       , (c, y) <- take 4 $ zip alienTypes [100,150..]]
 
--- aliens :: AlienType a =>
---   [SF (Event c) a] ->
---   SF (IMap (Event c), Event [SF (Event c) a]) (IMap a, IMap a)
--- aliens i = second index >>>
---            pKillSpawn NoEvent (fromList i) >>^
---            partition (not . killF)
-
-aliens :: AlienType a
-  => [Alien a b]
-  -> SF (IMap (Event b)) (IMap a, IMap a)
-aliens sfs = parA NoEvent (fromList sfs) >>^ partition (not . killF)
+aliens :: AlienType a =>
+  [SF (Event c) a] ->
+  SF (IMap (Event c), Event [SF (Event c) a]) (IMap a, Event (IMap a))
+aliens i = second index
+           >>> pKillSpawn NoEvent (fromList i)
+           >>> partAliveDeadE
 
 rockets :: SF (IMap (Event a), Event [Rocket a]) (IMap RocketMink)
 rockets = second index >>> pKillSpawn NoEvent empty >>^ W.catMaybes
@@ -263,16 +259,16 @@ game' = proc gi -> do
     p@(ps, _)       <- ship             -< shipD (keyRight gi) (keyLeft gi)
     spawnRs         <- basicGun         -< (avg ps, keyFire gi == G.Down)
     ae              <- collisionTest () -< as
-    (as, kills)     <- aliens aliens1   -< (ae)
-    -- re              <- collisionTest () -< rs
-    -- rs              <- rockets          -< (re, spawnRs)
+    (as, kills)     <- aliens aliens1   -< (ae, NoEvent)
+    re              <- collisionTest () -< rs
+    rs              <- rockets          -< (re, spawnRs)
     scaleP          <- scaleA           -< gi
   returnA -< scaleP $ Pictures $ (drawRectangle white <$> fst <$> (
-    -- elems rs ++
+    elems rs ++
     [p]
     )) ++
-    (draw <$> elems as) ++
-    [color white $ text $ show $ sum $ score <$> elems kills]
+    (draw <$> elems as)
+    -- [color white $ text $ show $ sum $ score <$> elems kills]
 
 drawRectangle :: G.Color -> [V2 Double] -> Picture
 drawRectangle c = color c . polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
