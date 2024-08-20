@@ -11,10 +11,17 @@ import GJK.Mink      (Mink)
 import GJK.Point     (Pt, dot)
 import GJK.Support   (polySupport)
 
+import Data.MemoTrie (HasTrie, memo2)
+
 import Linear.V2 ( V2 (V2) )
 
-collision' :: (Mink a, Mink b) -> Bool
-collision' = (fromMaybe False) . uncurry (collision 10)
+-- collision' :: (Mink a, Mink b) -> Bool
+-- collision' = (fromMaybe False) . uncurry (collision 10)
+
+collision' :: (HasTrie a, HasTrie b) => Mink a -> Mink b -> Bool
+collision' ma@(a, _) mb@(b, _) = memo2 collisionH a b ma mb
+  where
+    collisionH a b ma mb = fromMaybe False $ collision 10 ma mb
 
 circleSupport :: (Double, V2 Double) -> Pt -> Maybe Pt
 circleSupport (r, (V2 x y)) d@(a,b) =

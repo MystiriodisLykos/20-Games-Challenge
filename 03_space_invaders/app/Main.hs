@@ -31,6 +31,7 @@ import Debug.Trace (trace)
 
 import Linear.GJK         ( collision', minkRectangle' )
 import Linear.VectorSpace ()
+import Linear.MemoTrie    ()
 import Data.DMap          (toMap, elems, fromList, partition, DMap (DMap), IMap)
 import FRP.Yampa.Game     ( WithKillFlag (..)
                           , switchAfter, onlyEvery
@@ -40,6 +41,7 @@ import FRP.Yampa.Game     ( WithKillFlag (..)
                           )
 
 import Witherable as W
+import Data.MemoTrie (HasTrie)
 
 class WithCollision b a where
   collision :: a -> Mink b
@@ -262,7 +264,9 @@ collisionTest a = map' >>> iPre empty
     oneKey m' = Set.fromList $ take 1 $ Map.keys m'
 
 type CollisionCollection f c a = ( WithCollision c a
-                                 , W.Filterable f) :: Constraint
+                                 , W.Filterable f
+                                 , HasTrie c
+                                 ) :: Constraint
 
 collisionsMaybeMap :: forall c1 c2 a b d e f g.
   (CollisionCollection f c1 a, CollisionCollection g c2 b)
@@ -276,7 +280,7 @@ collisionsMaybeMap f g as bs = (
   fmap (\b -> W.mapMaybe (\a -> collisionR g a b) as) bs
   )
   where
-    collisionR f' a b = if collision' (collision @c1 a, collision @c2 b) then f' a b else Nothing
+    collisionR f' a b = if collision' (collision @c1 a) (collision @c2 b) then f' a b else Nothing
 
 collisions :: forall c1 c2 a b f g.
   (CollisionCollection f c1 a, CollisionCollection g c2 b)
@@ -305,20 +309,20 @@ polyCollisionsE :: (WithCollision [V2 Double] a, WithCollision [V2 Double] b, W.
   -> (f (Event ()), f (Event ()))
 polyCollisionsE = collisionsE @[V2 Double] @[V2 Double]
 
-collisionsA :: (WithCollision [V2 Double] a, WithCollision [V2 Double] b, W.Filterable f, Foldable f, Alternative f)
-  => SF (f a, f b) (f (Event ()), f (Event ()))
-collisionsA = (arr $ uncurry polyCollisionsE) >>> (iPre (empty, empty))
+-- collisionsA :: (WithCollision [V2 Double] a, WithCollision [V2 Double] b, W.Filterable f, Foldable f, Alternative f)
+--   => SF (f a, f b) (f (Event ()), f (Event ()))
+-- collisionsA = (arr $ uncurry polyCollisionsE) >>> (iPre (empty, empty))
 
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
     p@(ps, _)       <- ship             -< shipD (keyRight gi) (keyLeft gi)
     spawnRs         <- basicGun         -< (avg ps, keyFire gi == G.Down)
-    -- ae              <- collisionTest () -< as
+    ae              <- collisionTest () -< as
     (as, kills)     <- aliens aliens1   -< (ae, NoEvent)
-    -- re              <- collisionTest () -< rs
+    re              <- collisionTest () -< rs
     rs              <- rockets          -< (re, spawnRs)
-    (re, ae)        <- collisionsA      -< (rs, as)
+    -- (re, ae)        <- collisionsA      -< (rs, as)
     scaleP          <- scaleA           -< gi
   returnA -< scaleP $ Pictures $ (drawRectangle white <$> fst <$> (
     elems rs ++
