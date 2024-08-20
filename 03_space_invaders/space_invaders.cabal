@@ -66,6 +66,7 @@ executable space-invaders
         Linear.VectorSpace
         Linear.GJK
         Data.DMap
+        Data.MemoTrie
         FRP.Yampa.AltSwitches
         FRP.Yampa.Game
 
@@ -81,6 +82,7 @@ executable space-invaders
         linear ^>=1.22,
         gjk ^>=0.0.0.2,
         witherable ^>=0.4,
+        newtype-generics >= 0.5.3,
         containers
 
     -- Directories containing source files.
