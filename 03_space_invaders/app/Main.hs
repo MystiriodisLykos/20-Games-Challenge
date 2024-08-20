@@ -261,12 +261,16 @@ collisionTest a = map' >>> iPre empty
       returnA -< W.filter (isEvent) $ DMap Nothing $ e <$ Map.restrictKeys m (oneKey m)
     oneKey m' = Set.fromList $ take 1 $ Map.keys m'
 
-collisionsMaybeMap :: forall c1 c2 a b d e f. (WithCollision c1 a, WithCollision c2 b, W.Filterable f)
+type CollisionCollection f c a = ( WithCollision c a
+                                 , W.Filterable f) :: Constraint
+
+collisionsMaybeMap :: forall c1 c2 a b d e f g.
+  (CollisionCollection f c1 a, CollisionCollection g c2 b)
   => (a -> b -> Maybe d)
   -> (a -> b -> Maybe e)
   -> f a
-  -> f b
-  -> (f (f d), f (f e)) -- TODO: Maybe not event?, maybe (f (f d), f (f e)) a collection of hits
+  -> g b
+  -> (f (g d), g (f e))
 collisionsMaybeMap f g as bs = (
   fmap (\a -> W.mapMaybe (\b -> collisionR f a b) bs) as,
   fmap (\b -> W.mapMaybe (\a -> collisionR g a b) as) bs
@@ -274,21 +278,25 @@ collisionsMaybeMap f g as bs = (
   where
     collisionR f' a b = if collision' (collision @c1 a, collision @c2 b) then f' a b else Nothing
 
-collisions :: forall c1 c2 a b f. (WithCollision c1 a, WithCollision c2 b, W.Filterable f)
+collisions :: forall c1 c2 a b f g.
+  (CollisionCollection f c1 a, CollisionCollection g c2 b)
   => f a
-  -> f b
-  -> (f (f b), f (f a)) -- bs that collide with a indexed by a, as that collide with b indexed by b
+  -> g b
+  -> (f (g b), g (f a)) -- bs that collide with a indexed by f and as that collide with b indexed by g
 collisions = collisionsMaybeMap @c1 @c2 (\a b -> Just b) (\a b -> Just a)
 
-collisionsE :: forall c1 c2 a b f. (WithCollision c1 a, WithCollision c2 b, W.Filterable f, Foldable f)
+collisionsE :: forall c1 c2 a b f g.
+  ( CollisionCollection f c1 a, CollisionCollection g c2 b
+  , Foldable f, Foldable g)
   => f a
-  -> f b
-  -- -> (f (Event Int), f (Event Int))
-  -> (f (Event ()), f (Event ()))
-collisionsE as bs = bimap event' event' $ collisions @c1 @c2 as bs
+  -> g b
+  -- -> (f (Event Int), g (Event Int))
+  -> (f (Event ()), g (Event ()))
+collisionsE as bs = bimap (fmap event') (fmap event') $ collisions @c1 @c2 as bs
   where
-    -- event' = fmap (\f -> if length f > 0 then Event (length f) else NoEvent)
-    event' = fmap (\f -> if null f then NoEvent else Event ())
+    -- event' :: (Foldable g) => f' (g' a') -> f' (Event ())
+    -- event' = \f -> if length f > 0 then Event (length f) else NoEvent
+    event' f' = if null f' then NoEvent else Event ()
 
 polyCollisionsE :: (WithCollision [V2 Double] a, WithCollision [V2 Double] b, W.Filterable f, Foldable f)
   => f a
