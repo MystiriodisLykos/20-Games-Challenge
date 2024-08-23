@@ -1,9 +1,13 @@
 module Data.DMap ( elems, fromList
                  , DMap (..)
                  , IMap (..)
-                 , liftMap, liftMapF, liftMapBi
+                 , liftMapBi
+                 , lookup
+                 , mapWithKey
                  , partition
                  ) where
+
+import Prelude hiding (lookup)
 
 import qualified Data.Map.Strict as Map
 import Control.Applicative                ( Alternative, empty, (<|>) )
@@ -24,14 +28,11 @@ elems = Map.elems . toMap
 fromList :: [v] -> IMap v
 fromList as = DMap Nothing $ Map.fromAscList $ zip [0..] as
 
-liftMap :: (Map.Map k v -> Map.Map k v) -> DMap k v -> DMap k v
-liftMap f (DMap d m) = DMap d $ f m
+lookup :: Ord k => k -> DMap k v -> Maybe v
+lookup k (DMap d m) = Map.lookup k m <|> d
 
-liftMapF :: (Functor f)
-  => (Map.Map k v -> f (Map.Map k v))
-  -> DMap k v
-  -> f (DMap k v)
-liftMapF f (DMap d m) = (DMap d) <$> (f m)
+mapWithKey :: (a -> Maybe b) -> (k -> a -> b) -> DMap k a -> DMap k b
+mapWithKey df kf (DMap d m) = DMap (d >>= df) $ Map.mapWithKey kf m
 
 liftMapBi :: (Bifunctor f)
   => (Map.Map k v -> f (Map.Map k v) (Map.Map k v))
