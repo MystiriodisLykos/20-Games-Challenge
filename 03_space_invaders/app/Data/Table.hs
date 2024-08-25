@@ -1,34 +1,43 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module Data.Table ( Table, project, project' ) where
+module Data.Table ( Table, Projection
+                  , project, project' ) where
 
 import Data.List (transpose)
+import Data.Bifunctor (Bifunctor, bimap)
+import Debug.Trace
 
-class (Functor f, Functor g) => Table f g where
-  project :: (a -> b -> c) -> f a -> g b -> (f (g c), g (f c))
-  project f as bs = ( fmap (\a -> fmap (\b -> f a b) bs) as
-                    , fmap (\b -> fmap (\a -> f a b) as) bs
-                    )
+class Projection b f g where
+  project :: (x -> y -> z) -> b (f x) (g y) -> b (f (g z)) (g (f z))
 
-  project' :: (b -> a -> c) -> g b -> f a -> (g (f c), f (g c))
-  project' f bs as = let (a, b) = project (flip f) as bs in (b, a)
+type Table f g = Projection (,) f g
 
-listMaybeProjection :: (a -> b -> c) -> [a] -> Maybe b -> ([Maybe c], Maybe [c])
-listMaybeProjection f as Nothing = (Nothing <$ as, Nothing)
-listMaybeProjection f as (Just b) =
+instance {-# OVERLAPPABLE #-} (Functor f, Functor g) => Projection (,) f g where
+  project :: (a -> b -> c) -> (f a, g b) -> (f (g c), g (f c))
+  project f (as, bs) = ( fmap (\a -> fmap (\b -> f a b) bs) as
+                       , fmap (\b -> fmap (\a -> f a b) as) bs
+                       )
+
+project' :: (Functor f, Functor g, Table f g)
+  => (b -> a -> c)
+  -> (g b, f a)
+  -> (g (f c), f (g c))
+project' f (bs, as) = let (a, b) = project (flip f) (as, bs) in (b, a)
+
+listMaybeProjection :: (a -> b -> c) -> ([a], Maybe b) -> ([Maybe c], Maybe [c])
+listMaybeProjection f (as, Nothing) = (Nothing <$ as, Nothing)
+listMaybeProjection f (as, (Just b)) =
   let as' = (\a -> f a b) <$> as
   in (Just <$> as', Just as')
 
-instance Table [] Maybe where
+instance Projection (,) [] Maybe where
   project = listMaybeProjection
 
-instance Table Maybe [] where
-  project :: (a -> b -> c) -> Maybe a -> [b] -> (Maybe [c], [Maybe c])
-  project f as bs = project' f as bs
+instance Projection (,) Maybe [] where
+  project f = project' f
 
-instance Table [] [] where
-  project :: (a -> b -> c) -> [a] -> [b] -> ([[c]], [[c]])
-  project f as bs = 
+instance Projection (,) [] [] where
+  project :: (a -> b -> c) -> ([a], [b]) -> ([[c]], [[c]])
+  project f (as, bs) =
     let t = fmap (\a -> fmap (\b -> f a b) bs) as
     in (t, transpose t)
-
