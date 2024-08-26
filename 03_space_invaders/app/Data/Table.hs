@@ -3,14 +3,15 @@
 module Data.Table ( Table, Projection
                   , project, project' ) where
 
-import Data.List (transpose)
 import Data.Bifunctor (Bifunctor, bimap)
+import Data.Kind      (Constraint)
+import Data.List      (transpose)
 import Debug.Trace
 
 class Projection b f g where
   project :: (x -> y -> z) -> b (f x) (g y) -> b (f (g z)) (g (f z))
 
-type Table f g = Projection (,) f g
+type Table f g = Projection (,) f g :: Constraint
 
 instance {-# OVERLAPPABLE #-} (Functor f, Functor g) => Projection (,) f g where
   project :: (a -> b -> c) -> (f a, g b) -> (f (g c), g (f c))

@@ -11,7 +11,7 @@ import Witherable as W
 import Data.DMap (DMap (DMap, getDefault), lookup, mapWithKey)
 import Data.Table (Projection, project)
 
-instance forall k1 k2. (Ord k1, Ord k2) => Projection (,) (DMap k1) (DMap k2) where
+instance forall k1 k2. (Ord k2) => Projection (,) (DMap k1) (DMap k2) where
   project :: forall a b c. (a -> b -> c)
     -> (DMap k1 a, DMap k2 b)
     -> (DMap k1 (DMap k2 c), DMap k2 (DMap k1 c))
