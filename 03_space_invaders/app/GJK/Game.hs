@@ -11,6 +11,7 @@ import Data.Functor.Product  (Product (Pair))
 import Data.Functor.Identity (Identity (Identity, runIdentity))
 import Data.Functor.Const    (Const (Const, getConst))
 import Data.Monoid           (First (First, getFirst))
+import Data.Profunctor
 import Data.Maybe            (fromMaybe)
 import Data.Table            (Projection, Table, project)
 
@@ -48,7 +49,6 @@ collisions as bs =
     uncomp f = getCompose $ fmap getCompose f
     (abs, bas) = project collide (comp as, comp bs)
     collide a b = if collision' @c1 @c2 a b then Just (a, b) else Nothing
-
 
 -- What about Product g Maybe
 -- I really feel it in my gut that the Foldable constraints are not needed
@@ -93,6 +93,42 @@ comp'' f = Compose $ (\a -> Pair (First $ Just a) (Identity a)) <$> f
 -- newtype M f g a = M (f (g a))
 
 -- instance (Functor f) => Functor (M f Maybe) where
+
+-- I want something like (W.Filterable f) => (Maybe a, f a) where
+-- map (a -> Maybe b) (Maybe a, f a) = (Maybe b, f b)
+-- map (a -> Just b ) (Nothing, f a) = (Just b , f b)
+-- map (a -> Just b ) (Just a , f a) = (Just b , f b)
+-- map (a -> Nothing) (Just a , f a) = (Nothing , f b)
+
+data M f b a = M (a -> Maybe b) (Maybe b) (f a)
+
+-- mmap :: (a -> b) -> M f a -> Maybe a
+-- mmap f (M c (Just a) as) = join $ c <$> as
+
+mmap :: (Functor f) => (a -> c) -> (c -> a) -> M f b a -> M f b c
+mmap f g (M c (Just a) as) =
+  let
+    c' = c . g
+    cs = f <$> as
+    ms = c' <$> cs
+  in M c' (Just a) $ cs
+
+-- instance (Functor f) => Profunctor (M f b) where
+--   dimap = undefined
+  -- fmap f (M c (Just a) as) = join $ c <$> as
+  -- fmap f (M c Nothing as) = M c Nothing $ f <$> as
+
+-- instance (Functor f, Functor g) => Projection (,) (M f) (M g) where
+--   project :: (a -> b -> c)
+--     -> (M f a, M g b)
+--     -> (M f (M g c), M g (M f c))
+--   project = undefined
+
+p' :: (Table f g)
+  => (a -> b -> Maybe c)
+  -> (f a, g b)
+  -> (f (g (Maybe c)), g (f (Maybe c)))
+p' = project
 
 -- f :: a -> b -> Maybe ((a, b), c)
 -- fmap (\b -> f a b) (Something [1,2,3])
