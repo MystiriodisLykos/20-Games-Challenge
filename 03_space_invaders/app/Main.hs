@@ -32,6 +32,12 @@ import Debug.Trace (trace)
 import Linear.GJK         ( collision', minkRectangle' )
 import Linear.VectorSpace ()
 import Data.DMap          (toMap, elems, fromList, partition, DMap (DMap), IMap)
+import Data.Table.DMap    ()
+import GJK.Game           ( WithCollision, mink
+                          , CollisionsC
+                          , collisions
+                          )
+import Data.Table         (Table)
 import FRP.Yampa.Game     ( WithKillFlag (..)
                           , switchAfter, onlyEvery
                           , pKillSpawn
@@ -40,9 +46,6 @@ import FRP.Yampa.Game     ( WithKillFlag (..)
                           )
 
 import Witherable as W
-
-class WithCollision b a where
-  collision :: a -> Mink b
 
 class WithScore a where
   score :: a -> Int
@@ -62,17 +65,13 @@ data BasicAlienType = RedAlien {aDead :: Bool, aPos :: Pos}
                 deriving (Show, Eq)
 
 instance WithCollision [V2 Double] RocketMink where
-  collision = id
-
--- instance (WithCollision [V2 Double] a) => WithCollision Pos a where
---   collision a = (avg points, undefined)
---     where (points, _) = collision @[V2 Double] a
+  mink = id
 
 instance WithKillFlag (BasicAlienType) where
   killF = aDead
 
 instance WithCollision [V2 Double] BasicAlienType where
-  collision a = minkRectangle' (V2 30 30) (aPos a)
+  mink a = minkRectangle' (V2 30 30) (aPos a)
 
 instance WithScore BasicAlienType where
   score (RedAlien _ _) = 1
@@ -97,7 +96,6 @@ type Size = V2 Double
 type RectangleMink = Mink [V2 Double]
 type PaddleMink = RectangleMink
 type RocketMink = RectangleMink
-type AlienMink = RectangleMink
 
 type ScreenSize = V2 Int
 
@@ -140,8 +138,9 @@ lVelocity v = arr (\d -> (d' d) * v)
     d' _ = 0
 
 aVelocity :: SF a Vel
-aVelocity = constant (V2 0 0)
-  -- lVel
+aVelocity =
+  -- constant (V2 0 0)
+  lVel
   where
     switch' :: Double -> Vel -> SF a Vel -> SF a Vel
     switch' d v b = switchAfter d (constant v) b
@@ -210,18 +209,18 @@ aliens1 = [c (V2 x y) | x      <- take 9 [50,100..]
 aliens :: AlienType a =>
   [SF (Event c) a] ->
   SF (IMap (Event c), Event [SF (Event c) a]) (IMap a, Event (IMap a))
-aliens i = second index
+aliens i = second (index 1000)
            >>> pKillSpawn NoEvent (fromList i)
            >>> partAliveDeadE
 
 rockets :: SF (IMap (Event a), Event [Rocket a]) (IMap RocketMink)
-rockets = second index >>> pKillSpawn NoEvent empty >>^ W.catMaybes
+rockets = second (index 0) >>> pKillSpawn NoEvent empty >>^ W.catMaybes
 
-index :: SF (Event [a]) (Event (IMap a))
-index = proc as -> do
+index :: Int -> SF (Event [a]) (Event (IMap a))
+index i0 = proc as -> do
   rec
-    s <- iPre 0 -< e
-    e <- accumHoldBy (\p n -> (length n) + p) 0 -< as
+    s <- iPre i0 -< e
+    e <- accumHoldBy (\p n -> (length n) + p) i0 -< as
   returnA -< (DMap Nothing . Map.fromAscList . zip [s..e]) <$> as
 
 countDown :: Int -> SF (Event ()) (Event ())
@@ -261,53 +260,12 @@ collisionTest a = map' >>> iPre empty
       returnA -< W.filter (isEvent) $ DMap Nothing $ e <$ Map.restrictKeys m (oneKey m)
     oneKey m' = Set.fromList $ take 1 $ Map.keys m'
 
-type CollisionCollection f c a = ( WithCollision c a
-                                 , W.Filterable f) :: Constraint
-
-collisionsMaybeMap :: forall c1 c2 a b d e f g.
-  (CollisionCollection f c1 a, CollisionCollection g c2 b)
-  => (a -> b -> Maybe d)
-  -> (a -> b -> Maybe e)
-  -> f a
-  -> g b
-  -> (f (g d), g (f e))
-collisionsMaybeMap f g as bs = (
-  fmap (\a -> W.mapMaybe (\b -> collisionR f a b) bs) as,
-  fmap (\b -> W.mapMaybe (\a -> collisionR g a b) as) bs
-  )
+polyCollisions :: CollisionsC [V2 Double] [V2 Double] a b f g
+  => SF (f a, g b) (f (Event ()), g (Event ()))
+polyCollisions = arr collisions'
   where
-    collisionR f' a b = if collision' (collision @c1 a, collision @c2 b) then f' a b else Nothing
-
-collisions :: forall c1 c2 a b f g.
-  (CollisionCollection f c1 a, CollisionCollection g c2 b)
-  => f a
-  -> g b
-  -> (f (g b), g (f a)) -- bs that collide with a indexed by f and as that collide with b indexed by g
-collisions = collisionsMaybeMap @c1 @c2 (\a b -> Just b) (\a b -> Just a)
-
-collisionsE :: forall c1 c2 a b f g.
-  ( CollisionCollection f c1 a, CollisionCollection g c2 b
-  , Foldable f, Foldable g)
-  => f a
-  -> g b
-  -- -> (f (Event Int), g (Event Int))
-  -> (f (Event ()), g (Event ()))
-collisionsE as bs = bimap (fmap event') (fmap event') $ collisions @c1 @c2 as bs
-  where
-    -- event' :: (Foldable g) => f' (g' a') -> f' (Event ())
-    -- event' = \f -> if length f > 0 then Event (length f) else NoEvent
-    event' f' = if null f' then NoEvent else Event ()
-
-polyCollisionsE :: (WithCollision [V2 Double] a, WithCollision [V2 Double] b, W.Filterable f, Foldable f)
-  => f a
-  -> f b
-  -- -> (f (Event Int), f (Event Int))
-  -> (f (Event ()), f (Event ()))
-polyCollisionsE = collisionsE @[V2 Double] @[V2 Double]
-
-collisionsA :: (WithCollision [V2 Double] a, WithCollision [V2 Double] b, W.Filterable f, Foldable f, Alternative f)
-  => SF (f a, f b) (f (Event ()), f (Event ()))
-collisionsA = (arr $ uncurry polyCollisionsE) >>> (iPre (empty, empty))
+    collisions' = bimap e e . (uncurry $ collisions @[V2 Double] @[V2 Double])
+    e f = Event () <$ f
 
 game' :: SF GameInput Picture
 game' = proc gi -> do
@@ -318,7 +276,7 @@ game' = proc gi -> do
     (as, kills)     <- aliens aliens1   -< (ae, NoEvent)
     -- re              <- collisionTest () -< rs
     rs              <- rockets          -< (re, spawnRs)
-    (re, ae)        <- collisionsA      -< (rs, as)
+    (re, ae)        <- polyCollisions >>> (iPre (empty, empty)) -< (rs, as)
     scaleP          <- scaleA           -< gi
   returnA -< scaleP $ Pictures $ (drawRectangle white <$> fst <$> (
     elems rs ++

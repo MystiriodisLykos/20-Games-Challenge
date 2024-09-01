@@ -1,4 +1,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Data.Table ( Table, Projection
                   , project, project' ) where
@@ -14,7 +18,7 @@ class Projection b f g where
 type Table f g = Projection (,) f g :: Constraint
 
 instance {-# OVERLAPPABLE #-} (Functor f, Functor g) => Projection (,) f g where
-  project :: (a -> b -> c) -> (f a, g b) -> (f (g c), g (f c))
+  -- project :: (a -> b -> c) -> (f a, g b) -> (f (g c), g (f c))
   project f (as, bs) = ( fmap (\a -> fmap (\b -> f a b) bs) as
                        , fmap (\b -> fmap (\a -> f a b) as) bs
                        )
@@ -38,7 +42,7 @@ instance Projection (,) Maybe [] where
   project f = project' f
 
 instance Projection (,) [] [] where
-  project :: (a -> b -> c) -> ([a], [b]) -> ([[c]], [[c]])
+  -- project :: (a -> b -> c) -> ([a], [b]) -> ([[c]], [[c]])
   project f (as, bs) =
     let t = fmap (\a -> fmap (\b -> f a b) bs) as
     in (t, transpose t)
