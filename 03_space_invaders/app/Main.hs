@@ -29,7 +29,7 @@ import GHC.Float (double2Float, int2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
 import Debug.Trace (trace)
 
-import Linear.GJK         ( collision', minkRectangle' )
+import Linear.GJK         ( minkRectangle, rectanglePoints, Rectangle )
 import Linear.VectorSpace ()
 import Data.DMap          (toMap, elems, fromList, partition, DMap (DMap), IMap)
 import Data.Table.DMap    ()
@@ -54,9 +54,9 @@ class Drawable a where
   draw :: a -> Picture
 
 type AlienType a = ( WithKillFlag a
-                    , WithCollision [V2 Double] a
-                    , WithScore a
-                    , Drawable a) :: Constraint
+                   , WithCollision Rectangle a
+                   , WithScore a
+                   , Drawable a) :: Constraint
 
 data BasicAlienType = RedAlien {aDead :: Bool, aPos :: Pos}
                 | BlueAlien {aDead :: Bool, aPos :: Pos}
@@ -64,14 +64,14 @@ data BasicAlienType = RedAlien {aDead :: Bool, aPos :: Pos}
                 | YellowAlien {aDead :: Bool, aPos :: Pos}
                 deriving (Show, Eq)
 
-instance WithCollision [V2 Double] RocketMink where
+instance WithCollision Rectangle RectangleMink where
   mink = id
 
 instance WithKillFlag (BasicAlienType) where
   killF = aDead
 
-instance WithCollision [V2 Double] BasicAlienType where
-  mink a = minkRectangle' (V2 30 30) (aPos a)
+instance WithCollision Rectangle BasicAlienType where
+  mink a = minkRectangle (aPos a, V2 30 30)
 
 instance WithScore BasicAlienType where
   score (RedAlien _ _) = 1
@@ -82,7 +82,7 @@ instance WithScore BasicAlienType where
 instance Drawable BasicAlienType where
   draw a = draw' a $ color' a
     where
-      draw' a' c = drawRectangle c $ fst $ minkRectangle' (V2 30 30) (aPos a')
+      draw' a' c = drawRectangle c $ rectanglePoints $ fst $ mink a'
       -- color' a | (trace (show a) False) = undefined
       color' (RedAlien _ _) = red
       color' (BlueAlien _ _) = blue
@@ -93,7 +93,7 @@ type Pos = V2 Double
 type Vel = V2 Double
 type Size = V2 Double
 
-type RectangleMink = Mink [V2 Double]
+type RectangleMink = Mink Rectangle
 type PaddleMink = RectangleMink
 type RocketMink = RectangleMink
 
@@ -148,8 +148,8 @@ aVelocity =
     rVel   = switch' 10  (V2   50  0) (dVel lVel)
     dVel n = switch' 0.25 (V2 0 (-50)) n
 
-collisionRectangle :: V2 Double -> SF Pos (Mink [V2 Double])
-collisionRectangle s = arr $ minkRectangle' s
+collisionRectangle :: V2 Double -> SF Pos (Mink Rectangle)
+collisionRectangle s = arr (\p -> minkRectangle (p, s))
 
 ship :: Ship
 ship = lVelocity (V2 100 0) >>> (position $ V2 0 (-200)) >>> (collisionRectangle $ V2 50 5)
@@ -260,28 +260,32 @@ collisionTest a = map' >>> iPre empty
       returnA -< W.filter (isEvent) $ DMap Nothing $ e <$ Map.restrictKeys m (oneKey m)
     oneKey m' = Set.fromList $ take 1 $ Map.keys m'
 
-polyCollisions :: CollisionsC [V2 Double] [V2 Double] a b f g
+polyCollisions :: (CollisionsC Rectangle Rectangle a b f g
+                  , Alternative f
+                  , Alternative g)
   => SF (f a, g b) (f (Event ()), g (Event ()))
-polyCollisions = arr collisions'
+polyCollisions = arr collisions' >>> (iPre (empty, empty))
   where
-    collisions' = bimap e e . (uncurry $ collisions @[V2 Double] @[V2 Double])
+    collisions' = bimap e e . (uncurry $ collisions @Rectangle @Rectangle)
     e f = Event () <$ f
 
 game' :: SF GameInput Picture
 game' = proc gi -> do
   rec
-    p@(ps, _)       <- ship             -< shipD (keyRight gi) (keyLeft gi)
-    spawnRs         <- basicGun         -< (avg ps, keyFire gi == G.Down)
+    p@((ps, _), _)  <- ship             -< shipD (keyRight gi) (keyLeft gi)
+    spawnRs         <- basicGun         -< (ps, keyFire gi == G.Down)
     -- ae              <- collisionTest () -< as
     (as, kills)     <- aliens aliens1   -< (ae, NoEvent)
     -- re              <- collisionTest () -< rs
     rs              <- rockets          -< (re, spawnRs)
-    (re, ae)        <- polyCollisions >>> (iPre (empty, empty)) -< (rs, as)
+    (re, ae)        <- polyCollisions   -< (rs, as)
     scaleP          <- scaleA           -< gi
-  returnA -< scaleP $ Pictures $ (drawRectangle white <$> fst <$> (
-    elems rs ++
-    [p]
-    )) ++
+  returnA -< scaleP $ Pictures $
+    (drawRectangle white <$>
+      rectanglePoints . fst <$> (
+        elems rs ++
+        [p])
+    ) ++
     (draw <$> elems as)
     -- [color white $ text $ show $ sum $ score <$> elems kills]
 
