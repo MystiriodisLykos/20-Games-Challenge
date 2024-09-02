@@ -25,9 +25,6 @@ import GJK.Mink (Mink)
 import qualified GJK.Collision as C
 import Witherable as W
 
-collision :: Mink a -> Mink b -> Bool
-collision a = (fromMaybe False) . (C.collision 10 a)
-
 collision' :: forall c1 c2 a b.
   (WithCollision c1 a, WithCollision c2 b)
   => a -> b -> Bool

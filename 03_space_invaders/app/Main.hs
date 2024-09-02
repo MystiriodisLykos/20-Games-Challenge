@@ -43,6 +43,7 @@ import FRP.Yampa.Game     ( WithKillFlag (..)
                           , pKillSpawn
                           , switchWhenE
                           , partAliveDeadE
+                          , tagOnE
                           )
 
 import Witherable as W
@@ -63,6 +64,9 @@ data BasicAlienType = RedAlien {aDead :: Bool, aPos :: Pos}
                 | GreenAlien {aDead :: Bool, aPos :: Pos}
                 | YellowAlien {aDead :: Bool, aPos :: Pos}
                 deriving (Show, Eq)
+
+basicAlien :: (Bool -> Pos -> a) -> BasicAlienType -> a
+basicAlien f a = f (aDead a) (aPos a)
 
 instance WithCollision Rectangle RectangleMink where
   mink = id
@@ -175,14 +179,6 @@ vBoundRocket iTop r = proc e -> do
 basicGun :: Gun Bool ()
 basicGun = onlyEvery 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p])
 
-tagOn :: SF a b -> SF (a, Event c) (b, Event b)
-tagOn sf = proc (a, e) -> do
-  b <- sf -< a
-  returnA -< (b, e `tag` b)
-
-tagOnE :: SF () b -> SF (Event c) (b, Event b)
-tagOnE sf = ((,) ()) ^>> tagOn sf
-
 alienMovement :: Pos -> SF a Pos
 alienMovement i = aVelocity >>> position i
 
@@ -193,13 +189,13 @@ redAlien i = switch (tagOnE $
                   (\l -> constant l{aDead=True})
 
 blueAlien :: Pos -> BasicAlien a
-blueAlien i = redAlien i >>^ (\(RedAlien a b) -> BlueAlien a b)
+blueAlien i = redAlien i >>^ basicAlien BlueAlien
 
 greenAlien :: Pos -> BasicAlien a
-greenAlien i = redAlien i >>^ (\(RedAlien a b) -> GreenAlien a b)
+greenAlien i = redAlien i >>^ basicAlien GreenAlien
 
 yellowAlien :: Pos -> BasicAlien a
-yellowAlien i = redAlien i >>^ (\(RedAlien a b) -> YellowAlien a b)
+yellowAlien i = redAlien i >>^ basicAlien YellowAlien
 
 alienTypes = [redAlien, greenAlien, blueAlien, yellowAlien]
 
@@ -209,7 +205,7 @@ aliens1 = [c (V2 x y) | x      <- take 9 [50,100..]
 aliens :: AlienType a =>
   [SF (Event c) a] ->
   SF (IMap (Event c), Event [SF (Event c) a]) (IMap a, Event (IMap a))
-aliens i = second (index 1000)
+aliens i = second (index $ 1 + length i)
            >>> pKillSpawn NoEvent (fromList i)
            >>> partAliveDeadE
 
@@ -222,12 +218,6 @@ index i0 = proc as -> do
     s <- iPre i0 -< e
     e <- accumHoldBy (\p n -> (length n) + p) i0 -< as
   returnA -< (DMap Nothing . Map.fromAscList . zip [s..e]) <$> as
-
-countDown :: Int -> SF (Event ()) (Event ())
-countDown n = proc e -> do
-  i <- accumHold n -< e `tag` ((+) (-1))
-  e' <- edge -< i <= 0
-  returnA -< e'
 
 scaleA :: SF GameInput (Picture -> Picture)
 scaleA = arr $ (\(V2 x y) -> scale x y) . scale' . size'
@@ -245,7 +235,7 @@ parseGameInput gi _ = gi
 giI = GameInput G.Up G.Up G.Up (V2 1000 600)
 
 input :: SF (Event InputEvent) GameInput
-input = accumHoldBy parseGameInput $ giI
+input = accumHoldBy parseGameInput giI
 
 shipD :: G.KeyState -> G.KeyState -> VelDirection
 shipD G.Down G.Up = VelForward

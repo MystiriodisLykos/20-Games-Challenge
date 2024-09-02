@@ -5,6 +5,8 @@ module FRP.Yampa.Game ( WithKillFlag (..)
                       , switchWhen, switchWhenE
                       , switchAfter, onlyEvery
                       , partAliveDead, partAliveDeadE
+                      , countDown
+                      , tagOn, tagOnE
                       ) where
 
 import Control.Arrow       ( (>>>), (^>>), (>>^), (&&&)
@@ -15,7 +17,8 @@ import Data.Bool           (bool)
 import Debug.Trace (trace)
 
 import FRP.Yampa          ( SF, Event (Event, NoEvent), Time
-                          , constant, notYet, edgeBy
+                          , constant, notYet, edgeBy, edge
+                          , accumHold
                           )
 import FRP.Yampa.Event    ( catEvents, tag )
 import FRP.Yampa.EventS   ( after )
@@ -92,3 +95,18 @@ edgeLength = proc f -> do
 partAliveDeadE :: (WithKillFlag b, Foldable col, W.Filterable col)
   => SF (col b) (col b, Event (col b))
 partAliveDeadE = partAliveDead >>> (second $ edgeLength)
+
+
+countDown :: Int -> SF (Event ()) (Event ())
+countDown n = proc e -> do
+  i <- accumHold n -< e `tag` ((+) (-1))
+  e' <- edge -< i <= 0
+  returnA -< e'
+
+tagOn :: SF a b -> SF (a, Event c) (b, Event b)
+tagOn sf = proc (a, e) -> do
+  b <- sf -< a
+  returnA -< (b, e `tag` b)
+
+tagOnE :: SF () b -> SF (Event c) (b, Event b)
+tagOnE sf = ((,) ()) ^>> tagOn sf
