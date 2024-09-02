@@ -7,9 +7,10 @@
 module Data.Table ( Table, Projection
                   , project, project' ) where
 
-import Data.Bifunctor (Bifunctor, bimap)
-import Data.Kind      (Constraint)
-import Data.List      (transpose)
+import Data.Bifunctor        (Bifunctor, bimap)
+import Data.Functor.Identity (Identity (Identity))
+import Data.Kind             (Constraint)
+import Data.List             (transpose)
 import Debug.Trace
 
 class Projection b f g where
@@ -29,17 +30,24 @@ project' :: (Functor f, Functor g, Table f g)
   -> (g (f c), f (g c))
 project' f (bs, as) = let (a, b) = project (flip f) (as, bs) in (b, a)
 
-listMaybeProjection :: (a -> b -> c) -> ([a], Maybe b) -> ([Maybe c], Maybe [c])
-listMaybeProjection f (as, Nothing) = (Nothing <$ as, Nothing)
-listMaybeProjection f (as, (Just b)) =
-  let as' = (\a -> f a b) <$> as
-  in (Just <$> as', Just as')
+project1 :: (Functor f) => (forall d. d -> g d) -> (a -> b -> c) -> a -> f b -> (g (f c), f (g c))
+project1 c f a bs = let cs = f a <$> bs in (c cs, c <$> cs)
 
-instance Projection (,) [] Maybe where
-  project = listMaybeProjection
+project1A :: (Applicative g, Functor f) => (a -> b -> c) -> a -> f b -> (g (f c), f (g c))
+project1A = project1 pure
 
-instance Projection (,) Maybe [] where
-  project f = project' f
+instance {-# OVERLAPPABLE #-} Functor f => Projection (,) Maybe f where
+  project f (Nothing, bs) = (Nothing, Nothing <$ bs)
+  project f ((Just a), bs) = project1A f a bs
+
+instance {-# OVERLAPPABLE #-} Functor f => Projection (,) f Maybe where
+  project = project'
+
+instance {-# OVERLAPPABLE #-} Functor f => Projection (,) Identity f where
+  project f ((Identity a), bs) = project1A f a bs
+
+instance {-# OVERLAPPABLE #-} Functor f => Projection (,) f Identity where
+  project = project'
 
 instance Projection (,) [] [] where
   -- project :: (a -> b -> c) -> ([a], [b]) -> ([[c]], [[c]])
