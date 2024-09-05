@@ -2,20 +2,21 @@
 
 import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (&&&), (***), arr, first, second )
 import Control.Applicative                ( Alternative, empty, (<|>) )
-import FRP.Yampa                          ( SF, Event (Event, NoEvent)
+import FRP.Yampa                          ( SF, Event (Event, NoEvent), DTime, reactInit, react
                                           , tag, catEvents, accumHold, after, notYet, isEvent
                                           , accumHoldBy, dSwitch, constant, iPre, event
                                           , edge, integral, hold, switch, rSwitch
                                           , iEdge, repeatedly, switch, dropEvents )
 import Graphics.Gloss                     ( Display (InWindow)
                                           , Picture (Pictures)
+                                          , Color, blank
                                           , polygon, scale
                                           , white, black
                                           , green, blue
                                           , red, yellow
                                           , color, text
                                           )
-import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
+-- import Graphics.Gloss.Interface.FRP.Yampa ( InputEvent, playYampa )
 import Linear.V2 (V2 (V2))
 import Linear.Vector (Additive, lerp, zero)
 import GJK.Mink (Mink)
@@ -27,7 +28,13 @@ import qualified Data.Set as Set
 import qualified Data.Map.Strict as Map
 import GHC.Float (double2Float, int2Float)
 import qualified Graphics.Gloss.Interface.IO.Game as G
+
 import Debug.Trace (trace)
+import System.IO.Unsafe (unsafePerformIO)
+import System.Exit (exitSuccess)
+import           Data.IORef                       (newIORef, readIORef,
+                                                   writeIORef)
+import           Control.Monad                    (when)
 
 import Linear.GJK         ( minkRectangle, rectanglePoints, Rectangle )
 import Linear.VectorSpace ()
@@ -235,7 +242,10 @@ parseGameInput gi _ = gi
 giI = GameInput G.Up G.Up G.Up (V2 1000 600)
 
 input :: SF (Event InputEvent) GameInput
-input = accumHoldBy parseGameInput giI
+input = proc e -> do
+  gi <- accumHoldBy parseGameInput giI -< e
+  e <- after 5 (unsafePerformIO exitSuccess) -< ()
+  returnA -< event gi id e
 
 shipD :: G.KeyState -> G.KeyState -> VelDirection
 shipD G.Down G.Up = VelForward
@@ -287,3 +297,50 @@ defaultPlay = playYampa (InWindow "Space Invaders" (1000, 600) (200, 200)) black
 
 main :: IO ()
 main = defaultPlay $ input >>> game'
+
+type InputEvent = G.Event
+
+
+-- | Play the game in a window, updating when the value of the provided
+playYampa :: Display                       -- ^ The display method
+          -> Color                         -- ^ The background color
+          -> Int                           -- ^ The refresh rate, in Hertz
+          -> SF (Event InputEvent) Picture -- ^ Signal function
+          -> IO ()
+playYampa display color frequency mainSF = do
+  picRef <- newIORef blank
+
+  handle <- reactInit
+              (return NoEvent)
+              (\_ updated pic -> do when updated (picRef `writeIORef` pic)
+                                    return False
+              )
+              mainSF
+
+  let -- An action to convert the world to a picture
+      toPic :: DTime -> IO Picture
+      toPic = const $ readIORef picRef
+
+      -- A function to handle input events
+      handleInput :: G.Event -> DTime -> IO DTime
+      handleInput event timeAcc = case event of
+        -- The issue with lag with the mouse moves is that a mouse movement
+        -- causes the whole scrren to redraw, even though we don't use that input
+        -- this just ignores motion events and fixes the problem
+            (G.EventMotion _) -> return (timeAcc + delta)
+            otherwise -> do
+                _quit <- react handle (delta, Just (Event (trace (show event) event)))
+                return (timeAcc + delta)
+        where
+          delta = 0.01 / fromIntegral frequency
+
+      -- A function to step the world one iteration. It is passed the period of
+      -- time (in seconds) needing to be advanced
+      stepWorld :: Float -> DTime -> IO DTime
+      stepWorld delta timeAcc
+          | delta' > 0 = react handle (delta', Just NoEvent) >> return 0.0
+          | otherwise  = return (-delta')
+        where
+          delta' = realToFrac delta - timeAcc
+
+  G.playIO display color frequency 0 toPic handleInput stepWorld
