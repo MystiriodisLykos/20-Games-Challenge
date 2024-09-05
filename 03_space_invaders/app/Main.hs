@@ -242,10 +242,14 @@ parseGameInput gi _ = gi
 giI = GameInput G.Up G.Up G.Up (V2 1000 600)
 
 input :: SF (Event InputEvent) GameInput
-input = proc e -> do
-  gi <- accumHoldBy parseGameInput giI -< e
-  e <- after 5 (unsafePerformIO exitSuccess) -< ()
-  returnA -< event gi id e
+input = accumHoldBy parseGameInput giI
+
+-- exit after 10 seconds, useful for profiling
+-- input :: SF (Event InputEvent) GameInput
+-- input = proc e -> do
+--   gi <- accumHoldBy parseGameInput giI -< e
+--   e <- after 10 (unsafePerformIO exitSuccess) -< ()
+--   returnA -< event gi id e
 
 shipD :: G.KeyState -> G.KeyState -> VelDirection
 shipD G.Down G.Up = VelForward
@@ -292,30 +296,40 @@ game' = proc gi -> do
 drawRectangle :: G.Color -> [V2 Double] -> Picture
 drawRectangle c = color c . polygon . fmap (\(V2 x y) -> (double2Float x, double2Float y))
 
-defaultPlay :: SF (Event InputEvent) Picture -> IO ()
-defaultPlay = playYampa (InWindow "Space Invaders" (1000, 600) (200, 200)) black 60
+defaultPlay :: SF GameInput Picture -> IO ()
+defaultPlay = playYampa' (InWindow "Space Invaders" (1000, 600) (200, 200)) black 60 input giI
 
 main :: IO ()
-main = defaultPlay $ input >>> game'
+main = defaultPlay game'
 
 type InputEvent = G.Event
 
 
 -- | Play the game in a window, updating when the value of the provided
-playYampa :: Display                       -- ^ The display method
-          -> Color                         -- ^ The background color
-          -> Int                           -- ^ The refresh rate, in Hertz
-          -> SF (Event InputEvent) Picture -- ^ Signal function
-          -> IO ()
-playYampa display color frequency mainSF = do
+playYampa' :: Display                 -- ^ The display method
+           -> Color                   -- ^ The background color
+           -> Int                     -- ^ The refresh rate, in Hertz
+           -> SF (Event InputEvent) a -- ^ Handle inputs
+           -> a                       -- ^ initial input
+           -> SF a Picture            -- ^ Game function
+           -> IO ()
+playYampa' display color frequency input i mainSF = do
   picRef <- newIORef blank
+  inputRef <- newIORef i
 
   handle <- reactInit
-              (return NoEvent)
+              (return i)
               (\_ updated pic -> do when updated (picRef `writeIORef` pic)
                                     return False
               )
               mainSF
+
+  inputHandle <- reactInit
+                   (return NoEvent)
+                   (\_ updated i' -> do when updated (inputRef `writeIORef` i')
+                                        return False
+                   )
+                   input
 
   let -- An action to convert the world to a picture
       toPic :: DTime -> IO Picture
@@ -323,14 +337,17 @@ playYampa display color frequency mainSF = do
 
       -- A function to handle input events
       handleInput :: G.Event -> DTime -> IO DTime
-      handleInput event timeAcc = case event of
+      handleInput event timeAcc = do
+        _quit <- react inputHandle (delta, Just $ Event event)
+        return (timeAcc + delta)
+        -- case event of
         -- The issue with lag with the mouse moves is that a mouse movement
         -- causes the whole scrren to redraw, even though we don't use that input
         -- this just ignores motion events and fixes the problem
-            (G.EventMotion _) -> return (timeAcc + delta)
-            otherwise -> do
-                _quit <- react handle (delta, Just (Event (trace (show event) event)))
-                return (timeAcc + delta)
+            -- (G.EventMotion _) -> return (timeAcc + delta)
+            -- otherwise -> do
+            --     _quit <- react handle (delta, Just (Event (trace (show event) event)))
+            --     return (timeAcc + delta)
         where
           delta = 0.01 / fromIntegral frequency
 
@@ -338,7 +355,10 @@ playYampa display color frequency mainSF = do
       -- time (in seconds) needing to be advanced
       stepWorld :: Float -> DTime -> IO DTime
       stepWorld delta timeAcc
-          | delta' > 0 = react handle (delta', Just NoEvent) >> return 0.0
+          | delta' > 0 = do
+              i' <- readIORef inputRef
+              _ <- react handle (delta', Just i')
+              return 0.0
           | otherwise  = return (-delta')
         where
           delta' = realToFrac delta - timeAcc
