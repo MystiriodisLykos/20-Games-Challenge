@@ -178,8 +178,8 @@ vBoundRocket iTop r = proc e -> do
   returnA -< r' >>= cap top
   where
     cap :: Double -> RocketMink -> Maybe RocketMink
-    cap top' (rps, _) | (or $ over top' <$> rps) = Nothing
-    cap _    rm                                  = Just rm
+    cap top' (rps, _) | (over top' $ fst rps) = Nothing
+    cap _    rm                               = Just rm
     over :: Double -> Pos -> Bool
     over ym (V2 _ y) = y > ym
 
