@@ -58,8 +58,10 @@ rectanglePoints (c, s@(V2 w h)) = ((+) $ V2 (-w/2) (-h/2)) <$> [c, c + (V2 w 0),
 circleSupport :: (Double, V2 Double) -> Pt -> Maybe Pt
 circleSupport (r, (V2 x y)) d@(a,b) =
   let
-    len = sqrt $ dot d d
-  in Just ((a*r/len+x),(b*r/len+y))
+    s = r/(len d)
+  in Just (a*s+x, b*s+y)
+  --   len = sqrt $ dot d d
+  -- in Just ((a*r/len+x),(b*r/len+y))
 
 
 minkCircle :: Double -> V2 Double -> Mink (Double, V2 Double)

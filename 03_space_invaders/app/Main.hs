@@ -2,7 +2,7 @@
 
 import Control.Arrow                      ( returnA, (>>>), (^>>), (>>^), (&&&), (***), arr, first, second )
 import Control.Applicative                ( Alternative, empty, (<|>) )
-import FRP.Yampa                          ( SF, Event (Event, NoEvent), DTime, reactInit, react
+import FRP.Yampa                          ( SF, Event (Event, NoEvent), DTime, reactInit, react, time
                                           , tag, catEvents, accumHold, after, notYet, isEvent
                                           , accumHoldBy, dSwitch, constant, iPre, event
                                           , edge, integral, hold, switch, rSwitch
@@ -44,7 +44,6 @@ import GJK.Game           ( WithCollision, mink
                           , CollisionsC
                           , collisions
                           )
-import Data.Table         (Table)
 import FRP.Yampa.Game     ( WithKillFlag (..)
                           , switchAfter, onlyEvery
                           , pKillSpawn
@@ -157,7 +156,17 @@ aVelocity =
     switch' d v b = switchAfter d (constant v) b
     lVel   = switch' 10  (V2 (-50) 0) (dVel rVel)
     rVel   = switch' 10  (V2   50  0) (dVel lVel)
-    dVel n = switch' 0.25 (V2 0 (-50)) n
+    dVel n = switch' 0.5 (V2 0 (-50)) n
+
+aVelocity2 :: SF a Vel
+aVelocity2 =
+  lVel
+  where
+    switch' :: Double -> Vel -> SF a Vel -> SF a Vel
+    switch' d v b = switchAfter d (constant v) b
+    lVel   = switch' 18 (V2 (-50) 0) (dVel rVel)
+    rVel   = switch' 18 (V2   50  0) (dVel lVel)
+    dVel n = switch' 1  (V2 0 (-50)) n
 
 collisionRectangle :: V2 Double -> SF Pos (Mink Rectangle)
 collisionRectangle s = arr (\p -> minkRectangle (p, s))
@@ -171,6 +180,7 @@ rocket p = switchWhenE $ constant (V2 0 50) >>> position p >>> collisionRectangl
 rocket' :: Pos -> Rocket ()
 rocket' p = fmap Left ^>> vBoundRocket 300 (rocket p)
 
+-- This isn't working
 vBoundRocket :: Double -> Rocket a -> Rocket (Either a Double)
 vBoundRocket iTop r = proc e -> do
   r' <- r -< e >>= leftEvent
@@ -184,7 +194,7 @@ vBoundRocket iTop r = proc e -> do
     over ym (V2 _ y) = y > ym
 
 basicGun :: Gun Bool ()
-basicGun = onlyEvery 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p])
+basicGun = onlyEvery 1 $ second (iEdge False) >>^ (\(p, e) -> e `tag` [rocket' p, rocket' $ p + (V2 40 0)])
 
 alienMovement :: Pos -> SF a Pos
 alienMovement i = aVelocity >>> position i
@@ -206,8 +216,13 @@ yellowAlien i = redAlien i >>^ basicAlien YellowAlien
 
 alienTypes = [redAlien, greenAlien, blueAlien, yellowAlien]
 
-aliens1 = [c (V2 x y) | x      <- take 9 [50,100..]
-                      , (c, y) <- take 4 $ zip alienTypes [100,150..]]
+-- aliens1 = [c (V2 x y) | x      <- take 9 [50,100..]
+--                       , (c, y) <- take 4 $ zip alienTypes [100,150..]]
+
+aliens1 = [c (V2 x y) | x      <- take 17 [(-250),(-200)..]
+                      , (c, y) <- take 7 $ zip (cycle alienTypes) [(-50),0..]]
+
+-- pKillSpawnI i a = second (index $ 1 + length i) >>> pKillSpawn i (fromList i)
 
 aliens :: AlienType a =>
   [SF (Event c) a] ->
@@ -215,6 +230,15 @@ aliens :: AlienType a =>
 aliens i = second (index $ 1 + length i)
            >>> pKillSpawn NoEvent (fromList i)
            >>> partAliveDeadE
+
+newAlien :: Pos -> BasicAlien a
+newAlien i = switch (tagOnE $ aVelocity2
+                      >>> position i
+                      >>^ RedAlien False)
+                  (\l -> constant l{aDead=True})
+
+aSpawn :: SF a (Event [BasicAlien b])
+aSpawn = repeatedly 1 [newAlien $ V2 450 250]
 
 rockets :: SF (IMap (Event a), Event [Rocket a]) (IMap RocketMink)
 rockets = second (index 0) >>> pKillSpawn NoEvent empty >>^ W.catMaybes
@@ -233,7 +257,7 @@ scaleA = arr $ (\(V2 x y) -> scale x y) . scale' . size'
     scale' sizeC = sizeC / size' giI
 
 parseGameInput :: GameInput -> InputEvent -> GameInput
-parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) s _ _)   = gi { keyLeft = s }
+parseGameInput gi (G.EventKey (G.SpecialKey G.KeyLeft) s _ _)  = gi { keyLeft = s }
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeyRight) s _ _) = gi { keyRight = s }
 parseGameInput gi (G.EventKey (G.SpecialKey G.KeySpace) s _ _) = gi { keyFire = s }
 parseGameInput gi (G.EventResize (x, y)) = gi {screenSize = V2 x y}
@@ -279,6 +303,7 @@ game' = proc gi -> do
     p@((ps, _), _)  <- ship             -< shipD (keyRight gi) (keyLeft gi)
     spawnRs         <- basicGun         -< (ps, keyFire gi == G.Down)
     -- ae              <- collisionTest () -< as
+    -- asp             <- aSpawn           -< ()
     (as, kills)     <- aliens aliens1   -< (ae, NoEvent)
     -- re              <- collisionTest () -< rs
     rs              <- rockets          -< (re, spawnRs)
@@ -287,6 +312,7 @@ game' = proc gi -> do
   returnA -< scaleP $ Pictures $
     (drawRectangle white <$>
       rectanglePoints . fst <$> (
+        -- elems (trace (show $ length rs) rs) ++
         elems rs ++
         [p])
     ) ++
